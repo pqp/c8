@@ -59,12 +59,11 @@ printd (char* str, ...)
 void
 CHIP8_StartExecution ( void )
 {
-     uint16_t opcode;
-
-     core.pc = PROGRAM_LOC_OFFSET;
+     uint16_t opcode = 0;
 
      for (core.pc = PROGRAM_LOC_OFFSET;;) {
           // Fetch instruction.
+          opcode = 0;
           opcode |= core.mem[core.pc];
           opcode <<= 8;
           opcode |= core.mem[core.pc + 1];
@@ -95,15 +94,12 @@ CHIP8_StartExecution ( void )
 
                printd("0x00EE: Return from a subroutine.\n");
                     
-               core.pc = core.stack[core.sp];
-               core.sp--;
-               break;
+               core.pc = core.stack[--core.sp];
+               continue;
           }
 
-          const int op = opcode & 0xF000;
-
           // Execute instruction.
-          switch (op)
+          switch (opcode & 0xF000)
           {
           case 0x1000:
                /*
@@ -115,8 +111,6 @@ CHIP8_StartExecution ( void )
 
                printd("0x1000: jump to %3x\n", address);
 
-               // TODO: Make sure program counter increment after for loop doesn't
-               // mess up control flow.
                core.pc = address;
                break;
           }
@@ -265,6 +259,8 @@ CHIP8_StartExecution ( void )
                {
                     const int sum = core.v[x] + core.v[y];
 
+                    printd("0x8xy4: Set V%d(%d) = V%d(%d) + V%d(%d), set VF(%d) = carry\n", x, core.v[x], x, core.v[x], y, core.v[y], core.v[0xF]);
+
                     core.v[x] = (uint8_t)sum;
                     if (sum > 255)
                          core.v[0xF] = 1;
@@ -293,6 +289,7 @@ CHIP8_StartExecution ( void )
                case 0xE:
                     break;
                default:
+                    printd("Unknown 0x8000 variation 0x%3x.\n", opcode & 0x000F);
                     break;
                }
                break;
@@ -330,7 +327,7 @@ CHIP8_StartExecution ( void )
                */
           {
                core.pc = (opcode & 0x0FFF) + core.v[0];
-               continue;
+               continue; // Don't increment the program counter!
           }
           case 0xC000:
                /*
@@ -400,20 +397,25 @@ CHIP8_StartExecution ( void )
                     // core.v[x] = Platform_KeyPressed();
                     break;
                case 0x15:
+                    printd("0xFx15: Set delay timer(%d) = V%d(%d)\n", core.dt, x, core.v[x]);
                     core.dt = core.v[x];
                     break;
                case 0x18:
+                    printd("0xFx18: Set sound timer(%d) = V%d(%d)\n", core.st, x, core.v[x]);
                     core.st = core.v[x];
+                    break;
+               case 0x1E:
+                    printd("Set I(%d) = I(%d) + V%d(%d)\n", core.i, core.i, x, core.v[x]);
+                    core.i += core.v[x];
                     break;
                default:
                     printd("Unknown 0xF000 variation 0x%2x\n", opcode & 0x00FF);
                     break;
                }
-
                break;
           }
           default:
-               printd("Unknown opcode 0x%1x\n", op);
+               printd("Unknown opcode 0x%1x\n", opcode & 0xF000);
                break;
           }
           core.pc += 2;
