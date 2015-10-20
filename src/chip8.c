@@ -14,6 +14,25 @@
 // Programs start at this location in memory.
 #define PROGRAM_LOC_OFFSET 512
 
+uint8_t digits[] = {
+     0xF0, 0x90, 0x90, 0x90, 0xF0, 
+     0x20, 0x60, 0x20, 0x20, 0x70,
+     0xF0, 0x10, 0xF0, 0x80, 0xF0,
+     0xF0, 0x10, 0xF0, 0x10, 0xF0,
+     0x90, 0x90, 0xF0, 0x10, 0x10,
+     0xF0, 0x80, 0xF0, 0x10, 0xF0,
+     0xF0, 0x80, 0xF0, 0x90, 0xF0,
+     0xF0, 0x10, 0x20, 0x40, 0x40,
+     0xF0, 0x90, 0xF0, 0x90, 0xF0,
+     0xF0, 0x90, 0xF0, 0x10, 0xF0,
+     0xF0, 0x90, 0xF0, 0x90, 0x90,
+     0xE0, 0x90, 0xE0, 0x90, 0xE0,
+     0xF0, 0x80, 0x80, 0x80, 0xF0,
+     0xE0, 0x90, 0x90, 0x90, 0xE0,
+     0xF0, 0x80, 0xF0, 0x80, 0xF0,
+     0xF0, 0x80, 0xF0, 0x80, 0x80
+};
+
 // Our implementation of a CHIP-8 system.
 struct chip8_core {
      uint8_t  mem[MEM_SIZE];
@@ -35,9 +54,16 @@ struct chip8_core {
 void
 CHIP8_LoadProgramIntoRAM (const unsigned char* program, const unsigned programSize)
 {
-     void* dest = memcpy(core.mem+PROGRAM_LOC_OFFSET, program, programSize);
+     void* digitDest = memcpy(core.mem, digits, sizeof(digits));
 
-     if (!dest) {
+     // TODO: We need proper error handling here
+     if (!digitDest) {
+          printf("Failed to copy hex digits into CHIP-8 core memory.\n");
+     }
+
+     void* programDest = memcpy(core.mem+PROGRAM_LOC_OFFSET, program, programSize);
+
+     if (!programDest) {
           printf("Failed to copy program into CHIP-8 core memory.\n");
      }
 }
@@ -57,7 +83,7 @@ printd (char* str, ...)
 }
 
 void
-CHIP8_StartExecution ( void )
+CHIP8_StartExecution (void)
 {
      uint16_t opcode = 0;
 
@@ -407,6 +433,15 @@ CHIP8_StartExecution ( void )
                case 0x1E:
                     printd("Set I(%d) = I(%d) + V%d(%d)\n", core.i, core.i, x, core.v[x]);
                     core.i += core.v[x];
+                    break;
+               case 0x29:
+                    printd("Set I(%d) = %d sprite address (0x%3x)\n", core.i, core.v[x], (core.v[x] * 5));
+                    core.i = core.v[x] * 5;
+                    break;
+               case 0x33:
+                    core.mem[core.i]   = (core.v[x] % 1000) / 100;
+                    core.mem[core.i+1] = (core.v[x] % 100) / 10;
+                    core.mem[core.i+2] =  core.v[x] % 10;
                     break;
                default:
                     printd("Unknown 0xF000 variation 0x%2x\n", opcode & 0x00FF);

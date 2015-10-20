@@ -5,9 +5,6 @@
 
 unsigned char program[512];
 
-// LoadProgram
-// String -> Int
-// Consumes given filename, loads program into memory and returns a status integer.
 static int
 LoadProgram (const char* filename, unsigned* programSize)
 {
