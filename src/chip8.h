@@ -3,6 +3,7 @@
 
 // Non platform-specific CHIP-8 interpretation functionality.
 
+int  CHIP8_Main (int argc, char* argv[]);
 void CHIP8_LoadProgramIntoRAM (const unsigned char* program, const unsigned programSize);
 void CHIP8_StartExecution ( void );
 

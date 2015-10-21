@@ -7,6 +7,7 @@
 #endif
 
 #include "chip8.h"
+#include "platform.h"
 
 // 4KB of memory
 #define MEM_SIZE 4096
@@ -14,6 +15,7 @@
 // Programs start at this location in memory.
 #define PROGRAM_LOC_OFFSET 512
 
+// Bitmaps for hex digits
 uint8_t digits[] = {
      0xF0, 0x90, 0x90, 0x90, 0xF0, 
      0x20, 0x60, 0x20, 0x20, 0x70,
@@ -47,6 +49,51 @@ struct chip8_core {
      uint16_t i;
      uint16_t stack[16];
 } core;
+
+unsigned char program[512];
+unsigned programSize;
+
+static int
+LoadProgram (const char* filename, unsigned* programSize)
+{
+     FILE* programFile;
+
+     printf("Opening %s...\n", filename);
+
+     programFile = fopen(filename, "r");
+
+     if (!programFile) {
+          printf("Couldn't open %s.\n", filename);
+          return 0;
+     }
+
+     fseek(programFile, 0, SEEK_END);
+     const long fileSize = ftell(programFile);
+     rewind(programFile);
+
+     const int status = fread(&program, fileSize, 1, programFile);
+
+     if (status < 1) {
+          printf("Failed to read program into memory.\n");
+          return 0;
+     }
+
+     *programSize = fileSize;
+
+     return 1;
+}
+
+int
+CHIP8_Main (int argc, char* argv[])
+{
+     int result = LoadProgram("pong.ch8", &programSize);
+
+     if (!result) {
+          return 0;
+     }
+
+     return 1;
+}
 
 /* CHIP8_LoadProgramIntoRAM
    Load program into CHIP-8 core given program character buffer.
@@ -85,6 +132,8 @@ printd (char* str, ...)
 void
 CHIP8_StartExecution (void)
 {
+     CHIP8_LoadProgramIntoRAM(program, programSize);
+
      uint16_t opcode = 0;
 
      for (core.pc = PROGRAM_LOC_OFFSET;;) {
@@ -99,6 +148,8 @@ CHIP8_StartExecution (void)
                return;
           }
 
+          const unsigned x = (opcode & 0x0F00) >> 8;
+
           switch (opcode)
           {
           case 0x00E0:
@@ -107,7 +158,7 @@ CHIP8_StartExecution (void)
                  Clear the display.
                */
 
-               //Platform_ClearDisplay();
+               Platform_ClearDisplay();
                printd("0x00E0: Clear the display.\n");
 
                break;
@@ -133,7 +184,7 @@ CHIP8_StartExecution (void)
                  Jump to location nnn.
                */
           {
-               const int address = (opcode & 0x0FFF);
+               const unsigned address = (opcode & 0x0FFF);
 
                printd("0x1000: jump to %3x\n", address);
 
@@ -147,7 +198,7 @@ CHIP8_StartExecution (void)
                */
 
           {
-               const int address = (opcode & 0x0FFF);
+               const unsigned address = (opcode & 0x0FFF);
 
                printd("0x2000: Call subroutine at 0x%3x\n", address);
                
@@ -163,8 +214,7 @@ CHIP8_StartExecution (void)
                */
 
           {
-               const int x    = (opcode & 0x0F00) >> 8;
-               const int data = (opcode & 0x00FF);
+               const unsigned data = (opcode & 0x00FF);
 
                printd("0x3000: Skip next instruction if V%d(%d) = %d\n", x, core.v[x], data);
 
@@ -179,8 +229,7 @@ CHIP8_StartExecution (void)
                  Skip next instruction if Vx != kk.
                */
           {
-               const int x    = (opcode & 0x0F00) >> 8;
-               const int data = (opcode & 0x00FF);
+               const unsigned data = (opcode & 0x00FF);
 
                printd("0x4000: Skip next instruction if V%d(%d) != %d\n", x, core.v[x], data);
 
@@ -195,8 +244,7 @@ CHIP8_StartExecution (void)
                  Skip next instruction if Vx = Vy.
                */
           {
-               const int x = (opcode & 0x0F00) >> 8;
-               const int y = (opcode & 0x00F0) >> 4;
+               const unsigned y = (opcode & 0x00F0) >> 4;
 
                printd("0x5000: Skip next instruction if V%d(%d) = V%d(%d)\n", x, core.v[x], y, core.v[y]);
 
@@ -211,8 +259,7 @@ CHIP8_StartExecution (void)
                  Set Vx = kk.
                */
           {
-               const int x    = (opcode & 0x0F00) >> 8;
-               const int data = (opcode & 0x00FF);
+               const unsigned data = (opcode & 0x00FF);
 
                printd("0x6000: Set V%d(%d) = %d\n", x, core.v[x], data);
 
@@ -226,8 +273,7 @@ CHIP8_StartExecution (void)
                  Set Vx = Vx + kk.
                */
           {
-               const int x    = (opcode & 0x0F00) >> 8;
-               const int data = (opcode & 0x00FF);
+               const unsigned data = (opcode & 0x00FF);
 
                printd("0x7000: Set V%d(%d) = V%d + %d (%d)\n", x, core.v[x], x, data, core.v[x] + data);
 
@@ -236,8 +282,7 @@ CHIP8_StartExecution (void)
           }
           case 0x8000:
           {
-               const int x = (opcode & 0x0F00) >> 8;
-               const int y = (opcode & 0x00F0) >> 4;
+               const unsigned y = (opcode & 0x00F0) >> 4;
 
                switch (opcode & 0x000F)
                {
@@ -311,8 +356,21 @@ CHIP8_StartExecution (void)
                case 0x6:
                     break;
                case 0x7:
+                    /*
+                      8xy7 - SUBN Vx, Vy
+                      Set Vx = Vy - Vx, set VF = NOT borrow.
+                    */
+
+                    if (core.v[y] > core.v[x])
+                         core.v[0xF] = 1;
+                    else
+                         core.v[0xF] = 0;
+
+                    core.v[x] = core.v[y] - core.v[x];
                     break;
                case 0xE:
+                    printd("Set V%d(%d) = V%d(%d) SHL 1 (%d)", x, core.v[x], x, core.v[x], (core.v[x] & 0xF0) & 0x8);
+                    core.v[0xF] = (core.v[x] & 0xF0) & 0x8;
                     break;
                default:
                     printd("Unknown 0x8000 variation 0x%3x.\n", opcode & 0x000F);
@@ -326,8 +384,7 @@ CHIP8_StartExecution (void)
                  Skip next instruction if Vx != Vy.
                */
           {
-               const int x = (opcode & 0x0F00) >> 8;
-               const int y = (opcode & 0x00F0) >> 4;
+               const unsigned y = (opcode & 0x00F0) >> 4;
 
                printd("0x9xy0: Skip next instruction if V%d(%d) != V%d(%d).\n", x, core.v[x], y, core.v[y]);
 
@@ -376,8 +433,6 @@ CHIP8_StartExecution (void)
           }
           case 0xE000:
           {
-               const int x = (opcode & 0x0F00) >> 8;
-
                switch (opcode & 0x00FF)
                {
                case 0x9E:
@@ -409,20 +464,23 @@ CHIP8_StartExecution (void)
           }
           case 0xF000:
           {
-               const int x = (opcode & 0x0F00) >> 8;
-
                switch (opcode & 0x00FF)
                {
                case 0x07:
-                    /* Set Vx = delay timer value. */
+                    // Set Vx = delay timer value. 
+
                     printd("0xFx07: Set V%d(%d) = delay timer(%d).\n", x, core.v[x], core.dt);
                     core.v[x] = core.dt;
                     break;
                case 0x0A:
+                    // Wait for a key press, store the value of the key in Vx. 
+
                     printd("0xFx0A: Wait for key press, store value of key (%d) in V%d(%d).\n");
                     // core.v[x] = Platform_KeyPressed();
                     break;
                case 0x15:
+                    // Set delay timer = Vx.
+
                     printd("0xFx15: Set delay timer(%d) = V%d(%d)\n", core.dt, x, core.v[x]);
                     core.dt = core.v[x];
                     break;
@@ -431,11 +489,11 @@ CHIP8_StartExecution (void)
                     core.st = core.v[x];
                     break;
                case 0x1E:
-                    printd("Set I(%d) = I(%d) + V%d(%d)\n", core.i, core.i, x, core.v[x]);
+                    printd("0xFx1E: Set I(%d) = I(%d) + V%d(%d)\n", core.i, core.i, x, core.v[x]);
                     core.i += core.v[x];
                     break;
                case 0x29:
-                    printd("Set I(%d) = %d sprite address (0x%3x)\n", core.i, core.v[x], (core.v[x] * 5));
+                    printd("0xFx29: Set I(%d) = %d sprite address (0x%3x)\n", core.i, core.v[x], (core.v[x] * 5));
                     core.i = core.v[x] * 5;
                     break;
                case 0x33:
@@ -443,6 +501,23 @@ CHIP8_StartExecution (void)
                     core.mem[core.i+1] = (core.v[x] % 100) / 10;
                     core.mem[core.i+2] =  core.v[x] % 10;
                     break;
+               case 0x55:
+                    for (int j = 0; j < x; j++) {
+                         core.mem[core.i+j] = core.v[j];
+                    }
+                    break;
+               case 0x65:
+               {
+                    int k = 0;
+                    for (int j = core.i; j < core.i+x; j++) {
+                         if (k <= x) {
+                              core.v[k] = core.mem[j];
+                              k++;
+                         }
+                    }
+
+                    break;
+               }
                default:
                     printd("Unknown 0xF000 variation 0x%2x\n", opcode & 0x00FF);
                     break;
