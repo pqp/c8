@@ -369,8 +369,8 @@ CHIP8_StartExecution (void)
                     core.v[x] = core.v[y] - core.v[x];
                     break;
                case 0xE:
-                    printd("Set V%d(%d) = V%d(%d) SHL 1 (%d)", x, core.v[x], x, core.v[x], (core.v[x] & 0xF0) & 0x8);
-                    core.v[0xF] = (core.v[x] & 0xF0) & 0x8;
+                    printd("Set V%d(%d) = V%d(%d) SHL 1 (%d)", x, core.v[x], x, core.v[x], (core.v[x] >> 7) & 1);
+                    core.v[x] = (core.v[x] >> 7) & 1;
                     break;
                default:
                     printd("Unknown 0x8000 variation 0x%3x.\n", opcode & 0x000F);
