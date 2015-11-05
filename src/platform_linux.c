@@ -1,7 +1,15 @@
 #include "chip8.h"
+#include "platform.h"
+
 #include <gtk/gtk.h>
 
-static cairo_surface_t* surface = NULL;
+#include <stdlib.h>
+#include <pthread.h>
+
+static int interpreting = 1;
+
+static GtkWidget* window;
+static GtkWidget* drawingArea;
 
 //chip8_key
 void
@@ -14,98 +22,156 @@ Platform_ClearDisplay (void)
 {
 }
 
-void
-Platform_UpdateDisplay (void)
+static void*
+InterpreterLoop (void* threadID)
 {
-}
+     while (interpreting) {
+          CHIP8_FetchAndDecodeOpcode();
+     }
 
-static void
-button_click (GtkWidget *widget, gpointer data)
-{
-     g_print("Hello, world!\n");
-}
-
-static void
-clear_surface (void)
-{
-     cairo_t* cr;
-
-     cr = cairo_create(surface);
-
-     cairo_set_source_rgb(cr, 0, 0, 0);
-     cairo_paint(cr);
-
-     cairo_destroy(cr);
+     pthread_exit(NULL);
 }
 
 static gboolean
-configure_event (GtkWidget *widget, GdkEventConfigure* event, gpointer data)
+Draw (GtkWidget* widget, cairo_t* cr, gpointer data)
 {
-     if (surface)
-          cairo_surface_destroy(surface);
+     guint width, height;
+     GdkRGBA color;
 
-     surface = gdk_window_create_similar_surface(gtk_widget_get_window(widget),
-                                                 CAIRO_CONTENT_COLOR,
-                                                 gtk_widget_get_allocated_width(widget),
-                                                 gtk_widget_get_allocated_height(widget));
+     // This is sloppy!
+     cairo_scale(cr, 4, 4);
 
-     clear_surface();
+     width = gtk_widget_get_allocated_width (widget);
+     height = gtk_widget_get_allocated_height (widget);
 
-     return TRUE;
-}
+     for (int y = 0; y < SCREEN_HEIGHT; y++) {
+          for (int x = 0; x < SCREEN_WIDTH; x++) {
+               // if (core.vidmem[y][x])
+               cairo_rectangle(cr, x, y, 1, 1); 
+          }
+     }
+     
+     gtk_style_context_get_color (gtk_widget_get_style_context (widget),
+                                  0,
+                                  &color);
+     gdk_cairo_set_source_rgba (cr, &color);
 
-static gboolean
-draw (GtkWidget* widget, cairo_t* cr, gpointer data)
-{
-     cairo_set_source_surface(cr, surface, 0, 0);
-     cairo_paint(cr);
+     cairo_fill (cr);
 
      return FALSE;
 }
 
 static void
-activate (GtkApplication* app, gpointer user_data)
+Destroy (GtkApplication* app, gpointer userData)
 {
-     GtkWidget* window;
+     interpreting = 0;
+
+     exit(1);
+}
+
+static void
+KeyRelease (GtkWidget* widget, GdkEvent* event, gpointer userData)
+{
+     switch (event->key.keyval)
+     {
+     case GDK_KEY_F1:
+     {
+          interpreting = !interpreting;
+
+          if (interpreting) {
+               pthread_t thread;
+               pthread_create(&thread, NULL, InterpreterLoop, 0);
+          }
+
+          break;
+     }
+     case GDK_KEY_W:
+          pi.keys[0] = 1;
+          break;
+     case GDK_KEY_E:
+          break;
+     case GDK_KEY_R:
+          break;
+     case GDK_KEY_T:
+          break;
+     case GDK_KEY_S:
+          break;
+     case GDK_KEY_D:
+          break;
+     case GDK_KEY_F:
+          break;
+     case GDK_KEY_G:
+          break;
+     case GDK_KEY_X:
+          break;
+     case GDK_KEY_C:
+          break;
+     case GDK_KEY_V:
+          break;
+     case GDK_KEY_B:
+          break;
+     default:
+          break;
+     }
+}
+
+static void
+Redraw (gpointer data)
+{
+     gtk_widget_queue_resize(drawingArea);
+
+     //ClearKeys();
+}
+
+static void
+Activate (GtkApplication* app, gpointer userData)
+{
      GtkWidget* frame;
-     GtkWidget* drawing_area;
 
      window = gtk_application_window_new(app);
-     gtk_window_set_title(GTK_WINDOW(window), "Window");
-     gtk_window_set_default_size(GTK_WINDOW(window), 200, 200);
-
+     gtk_window_set_title(GTK_WINDOW(window), "C8");
+     gtk_window_set_default_size(GTK_WINDOW(window), SCREEN_WIDTH*4, SCREEN_HEIGHT*4);
+     //gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
+     g_signal_connect(G_OBJECT(window), "destroy", G_CALLBACK(Destroy), NULL);
+     g_signal_connect(G_OBJECT(window), "key-release-event", G_CALLBACK(KeyRelease), NULL);
      gtk_container_set_border_width(GTK_CONTAINER(window), 8);
 
      frame = gtk_frame_new(NULL);
      gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_IN);
      gtk_container_add(GTK_CONTAINER(window), frame);
 
-     drawing_area = gtk_drawing_area_new();
-     // TODO: Define width and height of CHIP-8 screen
-     gtk_widget_set_size_request(drawing_area, 64, 32);
-     gtk_container_add(GTK_CONTAINER(frame), drawing_area);
-
-     g_signal_connect(drawing_area, "draw", G_CALLBACK(draw), NULL);
-     g_signal_connect(drawing_area, "configure-event", G_CALLBACK(configure_event), NULL);
+     drawingArea = gtk_drawing_area_new();
+     gtk_widget_set_size_request(drawingArea, SCREEN_WIDTH, SCREEN_HEIGHT);
+     g_signal_connect (G_OBJECT(drawingArea), "draw",
+                       G_CALLBACK(Draw), NULL);
+     gtk_container_add(GTK_CONTAINER(frame), drawingArea);
 
      gtk_widget_show_all(window);
+
+     g_timeout_add(17, Redraw, NULL);
 }
 
 int
 main (int argc, char* argv[])
 {
      GtkApplication* app;
+     pthread_t iThread;
      int status;
      
      if (!CHIP8_Main(argc, argv)) {
           return 0;
      }
 
+     CHIP8_StartExecution();
+     pthread_create(&iThread, NULL, InterpreterLoop, 0);
+
      // TODO: Create a proper application ID 
      app = gtk_application_new("com.test.c8", G_APPLICATION_FLAGS_NONE);
-     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
+     g_signal_connect(app, "activate", G_CALLBACK(Activate), NULL);
      status = g_application_run(G_APPLICATION(app), argc, argv);
      g_object_unref(app);
 
-     return status;
+     pthread_exit(NULL);
+
+     return 0;
 }
