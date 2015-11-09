@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
-#include <stdint.h>
 
 #ifdef DEBUG
 #include <stdarg.h>
@@ -10,12 +9,6 @@
 
 #include "chip8.h"
 #include "platform.h"
-
-// 4KB of memory
-#define MEM_SIZE 4096
-
-// Programs start at this location in memory.
-#define PROGRAM_LOC_OFFSET 512
 
 // Bitmaps for hex digits
 static uint8_t digits[] = {
@@ -37,26 +30,11 @@ static uint8_t digits[] = {
      0xF0, 0x80, 0xF0, 0x80, 0x80
 };
 
-// Our implementation of a CHIP-8 system.
-static struct chip8_core {
-     uint8_t  mem[MEM_SIZE];
-     uint8_t  v[16];
-     uint8_t  vidmem[SCREEN_HEIGHT][SCREEN_WIDTH];
-
-     uint8_t  dt; // delay timer
-     uint8_t  st; // sound timer
-
-     uint8_t  sp; // stack pointer
-     uint16_t pc; // program counter
-     
-     uint16_t i;
-     uint16_t stack[16];
-} core;
+struct chip8_core core;
+struct platform_interface_t pi;
 
 static unsigned char program[512];
 static unsigned programSize;
-
-struct platform_interface_t pi;
 
 static int
 LoadProgram (const char* filename, unsigned* programSize)
@@ -91,7 +69,12 @@ LoadProgram (const char* filename, unsigned* programSize)
 int
 CHIP8_Main (int argc, char* argv[])
 {
-     int result = LoadProgram("pong.ch8", &programSize);
+     if (!argv[1]) {
+          printf("%s is not a proper filename.\n", argv[1]);
+          return 0;
+     }
+
+     int result = LoadProgram(argv[1], &programSize);
 
      if (!result) {
           return 0;
@@ -169,14 +152,13 @@ CHIP8_FetchAndDecodeOpcode (void)
             Clear the display.
           */
 
-          //Platform_ClearDisplay();
+          printd("0x00E0: Clear the display.\n");
 
           for (int y = 0; y < SCREEN_HEIGHT; y++) {
                for (int x = 0; x < SCREEN_WIDTH; x++) {
                     core.vidmem[y][x] = 0;
                }
           }
-          printd("0x00E0: Clear the display.\n");
 
           break;
                
@@ -189,6 +171,7 @@ CHIP8_FetchAndDecodeOpcode (void)
           printd("0x00EE: Return from a subroutine(return to stack[%d])\n", core.sp - 1);
                     
           core.pc = core.stack[--core.sp];
+          core.pc += 2;
           return;
      }
 
@@ -206,7 +189,7 @@ CHIP8_FetchAndDecodeOpcode (void)
           printd("0x1000: Jump to %3x\n", address);
 
           core.pc = address;
-          break;
+          return;
      }
      case 0x2000:
           /*
@@ -261,8 +244,6 @@ CHIP8_FetchAndDecodeOpcode (void)
             Skip next instruction if Vx = Vy.
           */
      {
-          const unsigned y = (opcode & 0x00F0) >> 4;
-
           printd("0x5000: Skip next instruction if V%d(%d) = V%d(%d)\n", x, core.v[x], y, core.v[y]);
 
           if (core.v[x] == core.v[y])
@@ -299,8 +280,6 @@ CHIP8_FetchAndDecodeOpcode (void)
      }
      case 0x8000:
      {
-          const unsigned y = (opcode & 0x00F0) >> 4;
-
           switch (opcode & 0x000F)
           {
           case 0x0:
@@ -373,7 +352,8 @@ CHIP8_FetchAndDecodeOpcode (void)
                core.v[x] -= core.v[y];
                break;
           case 0x6:
-               printd("0x8xy6: Not documented\n");
+               printd("0x8xy6: Not implemented or documented\n");
+               exit(1);
                break;
           case 0x7:
                /*
@@ -395,6 +375,7 @@ CHIP8_FetchAndDecodeOpcode (void)
                break;
           default:
                printd("Unknown 0x8000 variation 0x%3x.\n", opcode & 0x000F);
+               exit(1);
                break;
           }
           break;
@@ -405,8 +386,6 @@ CHIP8_FetchAndDecodeOpcode (void)
             Skip next instruction if Vx != Vy.
           */
      {
-          const unsigned y = (opcode & 0x00F0) >> 4;
-
           printd("0x9xy0: Skip next instruction if V%d(%d) != V%d(%d).\n", x, core.v[x], y, core.v[y]);
 
           if (core.v[x] != core.v[y])
@@ -440,8 +419,9 @@ CHIP8_FetchAndDecodeOpcode (void)
             Set Vx = random byte AND kk.
           */
      {
-          printd("0xC000: Set Vx = random byte and kk.\n");
-          exit(1);
+          const unsigned data = (opcode & 0x00FF);
+
+          printd("0xC000: Set V%d(%d) = random byte and kk(%d).\n", data);
           break;
      }
      case 0xD000:
@@ -454,7 +434,32 @@ CHIP8_FetchAndDecodeOpcode (void)
           const unsigned n = (opcode & 0x000F);
           
           printd("0xD000: Draw %d byte sprite at V%d(%d), V%d(%d)\n", n, x, core.v[x], y, core.v[y]);
-          core.vidmem[core.v[y]][core.v[x]] = 1;
+          
+          for (int i = 0; i < n; i++) {
+               // Get byte
+               // Iterate through each bit in byte,
+               // byte = row, bit = col
+
+               uint8_t row = core.mem[core.i+i];
+               int k = 0;
+
+               int sx = core.v[x];
+               int sy = core.v[y];
+               for (int j = 7; j > 0; j--) {
+                    int bit = (row >> j) & 1;
+                    if (bit) {
+                         core.vidmem[sy+i][sx+k] ^= 1;
+
+                         // If pixel is erased, set collision flag
+                         if (!core.vidmem[sy+i][sx+k])
+                              core.v[0xF] = 1;
+                         else
+                              core.v[0xF] = 0;
+                    }
+                    k++;
+               }
+               
+          }
           break;
      }
      case 0xE000:
@@ -467,10 +472,9 @@ CHIP8_FetchAndDecodeOpcode (void)
                   Skip next instruction if key with the value of Vx is pressed.
                */
                     
-               /* if (Platform_KeyPressed(core.v[x]))
-                  core.pc += 2;
-               */
-               printd("Skip next instruction if key with value of V%d(%d) is pressed\n", x, core.v[x]);
+               printd("0xEx9E: Skip next instruction if key with value of V%d(%d) is pressed\n", x, core.v[x]);
+               if (pi.keys[core.v[x]])
+                    core.pc += 2;
 
                break;
           case 0xA1:
@@ -479,10 +483,10 @@ CHIP8_FetchAndDecodeOpcode (void)
                  Skip next instruction if key with the value of Vx is not pressed.
                */
                       
-               /* if (!Platform_KeyPressed(core.v[x]))
-                  core.pc += 2;
-               */
-               printd("Skip next instruction if key with the value of V%d(%d) is not pressed\n", x, core.v[x]);
+               printd("0xExA1: Skip next instruction if key with the value of V%d(%d) is not pressed (%d)\n", x, core.v[x], !pi.keys[core.v[x]]);
+               if (!pi.keys[core.v[x]])
+                    core.pc += 2;
+
                break;
           }
           break;
@@ -495,7 +499,6 @@ CHIP8_FetchAndDecodeOpcode (void)
                // Set Vx = delay timer value. 
 
                printd("0xFx07: Set V%d(%d) = delay timer(%d).\n", x, core.v[x], core.dt);
-               exit(1);
                core.v[x] = core.dt;
                break;
           case 0x0A:
@@ -510,7 +513,6 @@ CHIP8_FetchAndDecodeOpcode (void)
                // Set delay timer = Vx.
 
                printd("0xFx15: Set delay timer(%d) = V%d(%d)\n", core.dt, x, core.v[x]);
-               exit(1);
                core.dt = core.v[x];
                break;
           case 0x18:
@@ -530,10 +532,14 @@ CHIP8_FetchAndDecodeOpcode (void)
                core.mem[core.i]   = (core.v[x] % 1000) / 100;
                core.mem[core.i+1] = (core.v[x] % 100) / 10;
                core.mem[core.i+2] = (core.v[x] % 10);
+               printd("0xFx33: Wrote %d at 0x%3x\n", (core.v[x] % 1000) / 100, core.i);
+               printd("0xFx33: Wrote %d at 0x%3x\n", (core.v[x] % 100) / 10, core.i+1);
+               printd("0xFx33: Wrote %d at 0x%3x\n", (core.v[x] % 10), core.i+2);
                break;
           case 0x55:
                printd("0xFx55: Store registers V0 through V%d in memory starting at location 0x%3x\n", x, core.i);
-               for (int j = 0; j < x; j++) {
+               for (int j = 0; j <= x; j++) {
+                    printd("0xFx55: Store V%d(%d) at 0x%3x\n", j, core.v[j], core.i+j);
                     core.mem[core.i+j] = core.v[j];
                }
                break;
@@ -541,8 +547,9 @@ CHIP8_FetchAndDecodeOpcode (void)
           {
                printd("0xFx65: Read registers V0 through V%d from memory starting at location 0x%3x\n", x, core.i);
                int k = 0;
-               for (int j = core.i; j < core.i+x; j++) {
+               for (int j = core.i; j <= core.i+x; j++) {
                     if (k <= x) {
+                         printd("0xFx65: Read %d into V%d\n", core.mem[j], k);
                          core.v[k] = core.mem[j];
                          k++;
                     }

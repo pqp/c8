@@ -4,59 +4,50 @@
 #include <gtk/gtk.h>
 
 #include <stdlib.h>
-#include <pthread.h>
+
+#define WINDOW_WIDTH_OFFSET   30
+#define WINDOW_HEIGHT_OFFSET  20
+#define WINDOW_BORDER_WIDTH   8
+
+#define DRAWING_AREA_SCALE    4
 
 static int interpreting = 1;
 
 static GtkWidget* window;
 static GtkWidget* drawingArea;
 
-//chip8_key
-void
-Platform_KeyPressed (void)
+static gboolean
+InterpreterLoop (void)
 {
-}
-
-void
-Platform_ClearDisplay (void)
-{
-}
-
-static void*
-InterpreterLoop (void* threadID)
-{
-     while (interpreting) {
+     if (interpreting) {
           CHIP8_FetchAndDecodeOpcode();
      }
 
-     pthread_exit(NULL);
+     return TRUE;
 }
 
 static gboolean
 Draw (GtkWidget* widget, cairo_t* cr, gpointer data)
 {
      guint width, height;
-     GdkRGBA color;
+     GdkRGBA white = { 255, 255, 255, 255 };
 
      // This is sloppy!
-     cairo_scale(cr, 4, 4);
+     cairo_scale(cr, DRAWING_AREA_SCALE, DRAWING_AREA_SCALE);
 
-     width = gtk_widget_get_allocated_width (widget);
-     height = gtk_widget_get_allocated_height (widget);
+     width = gtk_widget_get_allocated_width(widget);
+     height = gtk_widget_get_allocated_height(widget);
 
      for (int y = 0; y < SCREEN_HEIGHT; y++) {
           for (int x = 0; x < SCREEN_WIDTH; x++) {
-               // if (core.vidmem[y][x])
-               cairo_rectangle(cr, x, y, 1, 1); 
+               if (core.vidmem[y][x])
+                    cairo_rectangle(cr, x, y, 1, 1); 
           }
      }
      
-     gtk_style_context_get_color (gtk_widget_get_style_context (widget),
-                                  0,
-                                  &color);
-     gdk_cairo_set_source_rgba (cr, &color);
+     gdk_cairo_set_source_rgba(cr, &white);
 
-     cairo_fill (cr);
+     cairo_fill(cr);
 
      return FALSE;
 }
@@ -69,6 +60,7 @@ Destroy (GtkApplication* app, gpointer userData)
      exit(1);
 }
 
+// I think this sucks.
 static void
 KeyRelease (GtkWidget* widget, GdkEvent* event, gpointer userData)
 {
@@ -77,38 +69,57 @@ KeyRelease (GtkWidget* widget, GdkEvent* event, gpointer userData)
      case GDK_KEY_F1:
      {
           interpreting = !interpreting;
-
-          if (interpreting) {
-               pthread_t thread;
-               pthread_create(&thread, NULL, InterpreterLoop, 0);
-          }
-
           break;
      }
-     case GDK_KEY_W:
-          pi.keys[0] = 1;
+     case GDK_KEY_F2:
           break;
-     case GDK_KEY_E:
+     case GDK_KEY_2:
+          pi.keys[0x1] = 0;
           break;
-     case GDK_KEY_R:
+     case GDK_KEY_3:
+          pi.keys[0x2] = 0;
           break;
-     case GDK_KEY_T:
+     case GDK_KEY_4:
+          pi.keys[0x3] = 0;
           break;
-     case GDK_KEY_S:
+     case GDK_KEY_5:
+          pi.keys[0xC] = 0;
           break;
-     case GDK_KEY_D:
+     case GDK_KEY_w:
+          pi.keys[0x4] = 0;
           break;
-     case GDK_KEY_F:
+     case GDK_KEY_e:
+          pi.keys[0x5] = 0;
           break;
-     case GDK_KEY_G:
+     case GDK_KEY_r:
+          pi.keys[0x6] = 0;
           break;
-     case GDK_KEY_X:
+     case GDK_KEY_t:
+          pi.keys[0xD] = 0;
           break;
-     case GDK_KEY_C:
+     case GDK_KEY_s:
+          pi.keys[0x7] = 0;
           break;
-     case GDK_KEY_V:
+     case GDK_KEY_d:
+          pi.keys[0x8] = 0;
           break;
-     case GDK_KEY_B:
+     case GDK_KEY_f:
+          pi.keys[0x9] = 0;
+          break;
+     case GDK_KEY_g:
+          pi.keys[0xE] = 0;
+          break;
+     case GDK_KEY_x:
+          pi.keys[0xA] = 0;
+          break;
+     case GDK_KEY_c:
+          pi.keys[0x0] = 0;
+          break;
+     case GDK_KEY_v:
+          pi.keys[0xB] = 0;
+          break;
+     case GDK_KEY_b:
+          pi.keys[0xF] = 0;
           break;
      default:
           break;
@@ -116,38 +127,112 @@ KeyRelease (GtkWidget* widget, GdkEvent* event, gpointer userData)
 }
 
 static void
+KeyPress (GtkWidget* widget, GdkEvent* event, gpointer userData)
+{
+     switch (event->key.keyval)
+     {
+     case GDK_KEY_2:
+          pi.keys[0x1] = 1;
+          break;
+     case GDK_KEY_3:
+          pi.keys[0x2] = 1;
+          break;
+     case GDK_KEY_4:
+          pi.keys[0x3] = 1;
+          break;
+     case GDK_KEY_5:
+          pi.keys[0xC] = 1;
+          break;
+     case GDK_KEY_w:
+          pi.keys[0x4] = 1;
+          break;
+     case GDK_KEY_e:
+          pi.keys[0x5] = 1;
+          break;
+     case GDK_KEY_r:
+          pi.keys[0x6] = 1;
+          break;
+     case GDK_KEY_t:
+          pi.keys[0xD] = 1;
+          break;
+     case GDK_KEY_s:
+          pi.keys[0x7] = 1;
+          break;
+     case GDK_KEY_d:
+          pi.keys[0x8] = 1;
+          break;
+     case GDK_KEY_f:
+          pi.keys[0x9] = 1;
+          break;
+     case GDK_KEY_g:
+          pi.keys[0xE] = 1;
+          break;
+     case GDK_KEY_x:
+          pi.keys[0xA] = 1;
+          break;
+     case GDK_KEY_c:
+          pi.keys[0x0] = 1;
+          break;
+     case GDK_KEY_v:
+          pi.keys[0xB] = 1;
+          break;
+     case GDK_KEY_b:
+          pi.keys[0xF] = 1;
+          break;
+     default:
+          break;
+     }
+}
+
+static gboolean
 Redraw (gpointer data)
 {
      gtk_widget_queue_resize(drawingArea);
 
-     //ClearKeys();
+     return TRUE;
 }
 
 static void
 Activate (GtkApplication* app, gpointer userData)
 {
      GtkWidget* frame;
+     GtkWidget* statusBar;
+     GtkWidget* menuBar;
+
+     GdkColor black = { 0, 0, 0, 0 };
 
      window = gtk_application_window_new(app);
      gtk_window_set_title(GTK_WINDOW(window), "C8");
-     gtk_window_set_default_size(GTK_WINDOW(window), SCREEN_WIDTH*4, SCREEN_HEIGHT*4);
-     //gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
+     gtk_widget_set_size_request(GTK_WIDGET(window), (SCREEN_WIDTH*DRAWING_AREA_SCALE)+WINDOW_WIDTH_OFFSET, (SCREEN_HEIGHT*DRAWING_AREA_SCALE)+WINDOW_HEIGHT_OFFSET);
+     gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
+     gtk_container_set_border_width(GTK_CONTAINER(window), WINDOW_BORDER_WIDTH);
+
      g_signal_connect(G_OBJECT(window), "destroy", G_CALLBACK(Destroy), NULL);
+     g_signal_connect(G_OBJECT(window), "key-press-event", G_CALLBACK(KeyPress), NULL);
      g_signal_connect(G_OBJECT(window), "key-release-event", G_CALLBACK(KeyRelease), NULL);
-     gtk_container_set_border_width(GTK_CONTAINER(window), 8);
 
      frame = gtk_frame_new(NULL);
      gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_IN);
      gtk_container_add(GTK_CONTAINER(window), frame);
 
      drawingArea = gtk_drawing_area_new();
-     gtk_widget_set_size_request(drawingArea, SCREEN_WIDTH, SCREEN_HEIGHT);
+     gtk_widget_set_size_request(GTK_WIDGET(drawingArea), SCREEN_WIDTH, SCREEN_HEIGHT);
+     // TODO: Use non-deprecated function (adjust bg color in draw signal?)
+     gtk_widget_modify_bg(GTK_WIDGET(drawingArea), GTK_STATE_NORMAL, &black);
      g_signal_connect (G_OBJECT(drawingArea), "draw",
                        G_CALLBACK(Draw), NULL);
      gtk_container_add(GTK_CONTAINER(frame), drawingArea);
 
+     statusBar = gtk_statusbar_new();
+     //gtk_widget_set_size_request(GTK_WIDGET(statusBar), 100, 20);
+     gtk_container_add(GTK_CONTAINER(window), statusBar);
+
+     menuBar = gtk_menu_bar_new();
+     gtk_container_add(GTK_CONTAINER(window), menuBar);
+
      gtk_widget_show_all(window);
 
+     g_timeout_add(1, InterpreterLoop, NULL);
      g_timeout_add(17, Redraw, NULL);
 }
 
@@ -155,7 +240,6 @@ int
 main (int argc, char* argv[])
 {
      GtkApplication* app;
-     pthread_t iThread;
      int status;
      
      if (!CHIP8_Main(argc, argv)) {
@@ -163,15 +247,12 @@ main (int argc, char* argv[])
      }
 
      CHIP8_StartExecution();
-     pthread_create(&iThread, NULL, InterpreterLoop, 0);
 
      // TODO: Create a proper application ID 
      app = gtk_application_new("com.test.c8", G_APPLICATION_FLAGS_NONE);
      g_signal_connect(app, "activate", G_CALLBACK(Activate), NULL);
-     status = g_application_run(G_APPLICATION(app), argc, argv);
+     status = g_application_run(G_APPLICATION(app), 0, NULL);
      g_object_unref(app);
-
-     pthread_exit(NULL);
 
      return 0;
 }
