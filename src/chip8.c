@@ -178,6 +178,8 @@ CHIP8_FetchAndDecodeOpcode (void)
      // Execute instruction.
      switch (opcode & 0xF000)
      {
+     case 0x0000:
+          break;
      case 0x1000:
           /*
             1nnn - JP addr
@@ -436,18 +438,25 @@ CHIP8_FetchAndDecodeOpcode (void)
           printd("0xD000: Draw %d byte sprite at V%d(%d), V%d(%d)\n", n, x, core.v[x], y, core.v[y]);
           
           for (int i = 0; i < n; i++) {
-               // Get byte
-               // Iterate through each bit in byte,
                // byte = row, bit = col
 
                uint8_t row = core.mem[core.i+i];
-               int k = 0;
 
                int sx = core.v[x];
                int sy = core.v[y];
+
+               // Iterate through each bit in byte
+               int k = 0;
                for (int j = 7; j > 0; j--) {
                     int bit = (row >> j) & 1;
                     if (bit) {
+
+                         // Don't try to write outside of video memory
+                         if (((sy+i < 0) || (sy+i > SCREEN_HEIGHT-1)) ||
+                             ((sx+k < 0) || (sx+k > SCREEN_WIDTH-1))) {
+                              break;
+                         }
+
                          core.vidmem[sy+i][sx+k] ^= 1;
 
                          // If pixel is erased, set collision flag
@@ -505,9 +514,11 @@ CHIP8_FetchAndDecodeOpcode (void)
                // Wait for a key press, store the value of the key in Vx. 
 
                printd("0xFx0A: Wait for key press, store value of key (%d) in V%d(%d).\n");
+
                for (int i = 0; i < 15; i++) {
                     if (pi.keys[i]) core.v[x] = i;
                }
+
                break;
           case 0x15:
                // Set delay timer = Vx.
@@ -546,13 +557,9 @@ CHIP8_FetchAndDecodeOpcode (void)
           case 0x65:
           {
                printd("0xFx65: Read registers V0 through V%d from memory starting at location 0x%3x\n", x, core.i);
-               int k = 0;
-               for (int j = core.i; j <= core.i+x; j++) {
-                    if (k <= x) {
-                         printd("0xFx65: Read %d into V%d\n", core.mem[j], k);
-                         core.v[k] = core.mem[j];
-                         k++;
-                    }
+               for (int j = 0; j <= x; j++) {
+                    printd("0xFx65: Read %d into V%d\n", core.mem[core.i+j], j);
+                    core.v[j] = core.mem[core.i+j];
                }
 
                break;
@@ -568,6 +575,7 @@ CHIP8_FetchAndDecodeOpcode (void)
           exit(1);
           break;
      }
+
      core.pc += 2;
 
      if (core.dt > 0) {
