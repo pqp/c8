@@ -20,7 +20,9 @@ static gboolean
 InterpreterLoop (void)
 {
      if (interpreting) {
-          CHIP8_FetchAndDecodeOpcode();
+          if (CHIP8_FetchAndDecodeOpcode() < 0) {
+               exit(1);
+          }
      }
 
      return TRUE;

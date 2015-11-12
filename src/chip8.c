@@ -127,7 +127,7 @@ CHIP8_StartExecution (void)
      srand(time(NULL)); // I know rand() sucks and all, but...
 }
 
-void
+int
 CHIP8_FetchAndDecodeOpcode (void)
 {
      // Fetch instruction.
@@ -138,7 +138,7 @@ CHIP8_FetchAndDecodeOpcode (void)
 
      if (!opcode) {
           printd("NULL opcode! Halting.\n");
-          return;
+          return -1;
      }
 
      const unsigned x = (opcode & 0x0F00) >> 8;
@@ -170,9 +170,14 @@ CHIP8_FetchAndDecodeOpcode (void)
 
           printd("0x00EE: Return from a subroutine(return to stack[%d])\n", core.sp - 1);
                     
+          if (core.sp - 1 < 0) {
+               printf("0x00EE: Stack underflow. Halting!\n");
+               return -1;
+          }
+        
           core.pc = core.stack[--core.sp];
           core.pc += 2;
-          return;
+          return 0;
      }
 
      // Execute instruction.
@@ -191,7 +196,7 @@ CHIP8_FetchAndDecodeOpcode (void)
           printd("0x1000: Jump to %3x\n", address);
 
           core.pc = address;
-          return;
+          return 0;
      }
      case 0x2000:
           /*
@@ -207,7 +212,7 @@ CHIP8_FetchAndDecodeOpcode (void)
           core.stack[core.sp++] = core.pc;
           core.pc = address;
 
-          return;
+          return 0;
      }
      case 0x3000:
           /*
@@ -413,7 +418,7 @@ CHIP8_FetchAndDecodeOpcode (void)
      {
           printd("0xBnnn: Not documented\n");
           core.pc = (opcode & 0x0FFF) + core.v[0];
-          return; // Don't increment the program counter!
+          return 0; // Don't increment the program counter!
      }
      case 0xC000:
           /*
@@ -572,7 +577,7 @@ CHIP8_FetchAndDecodeOpcode (void)
      }
      default:
           printd("Unknown opcode 0x%1x\n", opcode & 0xF000);
-          exit(1);
+          return -1;
           break;
      }
 
@@ -582,4 +587,6 @@ CHIP8_FetchAndDecodeOpcode (void)
           printd("Decrement delay timer (%d)\n", core.dt - 1);
           core.dt--;
      }
+
+     return 0;
 }
