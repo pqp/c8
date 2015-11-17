@@ -4,6 +4,7 @@
 #include <gtk/gtk.h>
 
 #include <stdlib.h>
+#include <string.h>
 
 #define WINDOW_WIDTH_OFFSET   30
 #define WINDOW_HEIGHT_OFFSET  20
@@ -11,18 +12,50 @@
 
 #define DRAWING_AREA_SCALE    4
 
-static int interpreting = 1;
+static int interpreting = 0;
+static int stepping = 0;
 
-static GtkWidget* window;
-static GtkWidget* drawingArea;
+static GtkWidget* mainWindow, *drawingArea;
+static GtkWidget* debugWindow;
+static GtkWidget* vLabel, *coreLabel;
+
+static char str[1024];
 
 static gboolean
 InterpreterLoop (void)
 {
-     if (interpreting) {
-          if (CHIP8_FetchAndDecodeOpcode() < 0) {
-               exit(1);
-          }
+     if (!interpreting) {
+          gtk_window_set_title(GTK_WINDOW(mainWindow), "C8 (paused)");
+
+          return TRUE;
+     }
+
+     if (CHIP8_FetchAndDecodeOpcode() < 0) {
+          exit(1);
+     }
+
+     snprintf(str, sizeof(str), "V0: %d\tV1: %d\tV2: %d\tV3: %d\t"
+              "V4: %d\tV5: %d\tV6: %d\tV7: %d\n\n"
+              "V8: %d\tV9: %d\tV10: %d\tV11: %d\t"
+              "V12: %d\tV13: %d\tV14: %d\tV15: %d",
+              core.v[0], core.v[1], core.v[2], core.v[3],
+              core.v[4], core.v[5], core.v[6], core.v[7],
+              core.v[8], core.v[9], core.v[10], core.v[11],
+              core.v[12], core.v[13], core.v[14], core.v[15]);
+     
+     gtk_label_set_text(GTK_LABEL(vLabel), str);
+
+     str[0] = '\0';
+
+     snprintf(str, sizeof(str), "DT: %d\n\nST: %d\n\nSP: %d\n\nPC: 0x%3x\n\nI: 0x%3x\n\nStack: 0x%3xd\n\n",
+              core.dt, core.st, core.sp, core.pc, core.i, core.stack[core.sp]);
+
+     gtk_label_set_text(GTK_LABEL(coreLabel), str);
+     gtk_window_set_title(GTK_WINDOW(mainWindow), "C8");
+
+     if (stepping) {
+          interpreting = 0;
+          stepping = 0;
      }
 
      return TRUE;
@@ -195,27 +228,43 @@ Redraw (gpointer data)
 }
 
 static void
+PauseClicked (void)
+{
+     interpreting = !interpreting;
+}
+
+static void
+StepClicked (void)
+{
+     interpreting = 1;
+     stepping = 1;
+}
+
+static void
 Activate (GtkApplication* app, gpointer userData)
 {
      GtkWidget* frame;
-     GtkWidget* statusBar;
-     GtkWidget* menuBar;
-
      GdkColor black = { 0, 0, 0, 0 };
 
-     window = gtk_application_window_new(app);
-     gtk_window_set_title(GTK_WINDOW(window), "C8");
-     gtk_widget_set_size_request(GTK_WIDGET(window), (SCREEN_WIDTH*DRAWING_AREA_SCALE)+WINDOW_WIDTH_OFFSET, (SCREEN_HEIGHT*DRAWING_AREA_SCALE)+WINDOW_HEIGHT_OFFSET);
-     gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
-     gtk_container_set_border_width(GTK_CONTAINER(window), WINDOW_BORDER_WIDTH);
+     GtkWidget* scroll, *codeView;
+     GtkWidget* debugGrid, *labelGrid;
 
-     g_signal_connect(G_OBJECT(window), "destroy", G_CALLBACK(Destroy), NULL);
-     g_signal_connect(G_OBJECT(window), "key-press-event", G_CALLBACK(KeyPress), NULL);
-     g_signal_connect(G_OBJECT(window), "key-release-event", G_CALLBACK(KeyRelease), NULL);
+     GtkWidget* buttonBox;
+     GtkWidget* pauseButton, *stepButton;
+
+     mainWindow = gtk_application_window_new(app);
+     gtk_window_set_title(GTK_WINDOW(mainWindow), "C8");
+     gtk_widget_set_size_request(GTK_WIDGET(mainWindow), (SCREEN_WIDTH*DRAWING_AREA_SCALE)+WINDOW_WIDTH_OFFSET, (SCREEN_HEIGHT*DRAWING_AREA_SCALE)+WINDOW_HEIGHT_OFFSET);
+     gtk_window_set_resizable(GTK_WINDOW(mainWindow), FALSE);
+     gtk_container_set_border_width(GTK_CONTAINER(mainWindow), WINDOW_BORDER_WIDTH);
+
+     g_signal_connect(G_OBJECT(mainWindow), "destroy", G_CALLBACK(Destroy), NULL);
+     g_signal_connect(G_OBJECT(mainWindow), "key-press-event", G_CALLBACK(KeyPress), NULL);
+     g_signal_connect(G_OBJECT(mainWindow), "key-release-event", G_CALLBACK(KeyRelease), NULL);
 
      frame = gtk_frame_new(NULL);
      gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_IN);
-     gtk_container_add(GTK_CONTAINER(window), frame);
+     gtk_container_add(GTK_CONTAINER(mainWindow), frame);
 
      drawingArea = gtk_drawing_area_new();
      gtk_widget_set_size_request(GTK_WIDGET(drawingArea), SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -225,14 +274,51 @@ Activate (GtkApplication* app, gpointer userData)
                        G_CALLBACK(Draw), NULL);
      gtk_container_add(GTK_CONTAINER(frame), drawingArea);
 
-     statusBar = gtk_statusbar_new();
-     //gtk_widget_set_size_request(GTK_WIDGET(statusBar), 100, 20);
-     gtk_container_add(GTK_CONTAINER(window), statusBar);
+     gtk_widget_show_all(mainWindow);
 
-     menuBar = gtk_menu_bar_new();
-     gtk_container_add(GTK_CONTAINER(window), menuBar);
+     debugWindow = gtk_application_window_new(app);
+     gtk_widget_set_size_request(GTK_WIDGET(debugWindow), 600, 400);
+     gtk_window_set_title(GTK_WINDOW(debugWindow), "Debugger");
 
-     gtk_widget_show_all(window);
+     // Create window and label grids
+     debugGrid = gtk_grid_new();
+     labelGrid = gtk_grid_new();
+     gtk_container_add(GTK_CONTAINER(debugWindow), debugGrid);
+
+     // Create buttonbox and buttons
+     buttonBox = gtk_button_box_new(GTK_ORIENTATION_VERTICAL);
+
+     pauseButton = gtk_button_new_with_label("Pause/Resume");
+     stepButton = gtk_button_new_with_label("Step");
+     gtk_container_add(GTK_CONTAINER(buttonBox), pauseButton);
+     gtk_container_add(GTK_CONTAINER(buttonBox), stepButton);
+
+     g_signal_connect(G_OBJECT(pauseButton), "clicked", G_CALLBACK(PauseClicked), NULL);
+     g_signal_connect(G_OBJECT(stepButton), "clicked", G_CALLBACK(StepClicked), NULL);
+
+     vLabel = gtk_label_new("");
+     coreLabel = gtk_label_new("");
+
+     // Create scrolled window for textview
+     scroll = gtk_scrolled_window_new(NULL, NULL);
+     gtk_widget_set_hexpand(scroll, TRUE);
+     gtk_widget_set_vexpand(scroll, TRUE);
+
+     // Create code textview
+     codeView = gtk_text_view_new();
+     gtk_text_view_set_editable(GTK_TEXT_VIEW (codeView), FALSE);
+     gtk_container_add(GTK_CONTAINER(scroll), codeView);
+
+     // Attach widgets to debug window grid
+     gtk_grid_attach(debugGrid, buttonBox, 0, 0, 1, 1);
+     gtk_grid_attach(debugGrid, coreLabel, 0, 1, 1, 1);
+     gtk_grid_attach(debugGrid, labelGrid, 1, 0, 1, 1);
+     gtk_grid_attach(debugGrid, scroll,    1, 1, 1, 1);
+
+     // Attach labels to label grid
+     gtk_grid_attach(labelGrid, vLabel, 0, 0, 1, 1);
+
+     gtk_widget_show_all(debugWindow);
 
      g_timeout_add(1, InterpreterLoop, NULL);
      g_timeout_add(17, Redraw, NULL);

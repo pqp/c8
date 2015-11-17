@@ -168,7 +168,7 @@ CHIP8_FetchAndDecodeOpcode (void)
             Return from a subroutine.
           */
 
-          printd("0x00EE: Return from a subroutine(return to stack[%d])\n", core.sp - 1);
+          printd("0x00EE: Return from a subroutine(return to stack[%d], address 0x%3x)\n", core.sp - 1, core.stack[core.sp-1]);
                     
           if (core.sp - 1 < 0) {
                printf("0x00EE: Stack underflow. Halting!\n");
@@ -176,8 +176,8 @@ CHIP8_FetchAndDecodeOpcode (void)
           }
         
           core.pc = core.stack[--core.sp];
-          core.pc += 2;
-          return 0;
+          return 0; // We don't want to increment the program counter,
+                    // otherwise we'll skip the instruction pointed to by the stack.
      }
 
      // Execute instruction.
@@ -193,7 +193,7 @@ CHIP8_FetchAndDecodeOpcode (void)
      {
           const unsigned address = (opcode & 0x0FFF);
 
-          printd("0x1000: Jump to %3x\n", address);
+          printd("0x1000: Jump to 0x%3x\n", address);
 
           core.pc = address;
           return 0;
@@ -360,7 +360,7 @@ CHIP8_FetchAndDecodeOpcode (void)
                break;
           case 0x6:
                printd("0x8xy6: Not implemented or documented\n");
-               exit(1);
+               return -1;
                break;
           case 0x7:
                /*
@@ -382,7 +382,7 @@ CHIP8_FetchAndDecodeOpcode (void)
                break;
           default:
                printd("Unknown 0x8000 variation 0x%3x.\n", opcode & 0x000F);
-               exit(1);
+               return -1;
                break;
           }
           break;
@@ -457,6 +457,8 @@ CHIP8_FetchAndDecodeOpcode (void)
                     if (bit) {
 
                          // Don't try to write outside of video memory
+                         // (eventually sprites should wrap around
+                         // to opposite side of display)
                          if (((sy+i < 0) || (sy+i > SCREEN_HEIGHT-1)) ||
                              ((sx+k < 0) || (sx+k > SCREEN_WIDTH-1))) {
                               break;
