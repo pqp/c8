@@ -19,10 +19,16 @@ static GtkWidget* mainWindow, *drawingArea;
 static GtkWidget* debugWindow;
 static GtkWidget* vLabel, *coreLabel;
 
-static char str[1024];
+// Contents of V registers for debugger
+static char regStr[1024];
+
+// Disassembly of program code
+static char disassemblyText[2048];
+
+static uint16_t pcEnd;
 
 static gboolean
-InterpreterLoop (void)
+InterpreterLoop (gpointer data)
 {
      if (!interpreting) {
           gtk_window_set_title(GTK_WINDOW(mainWindow), "C8 (paused)");
@@ -34,7 +40,8 @@ InterpreterLoop (void)
           exit(1);
      }
 
-     snprintf(str, sizeof(str), "V0: %d\tV1: %d\tV2: %d\tV3: %d\t"
+     snprintf(regStr, sizeof(regStr),
+              "V0: %d\tV1: %d\tV2: %d\tV3: %d\t"
               "V4: %d\tV5: %d\tV6: %d\tV7: %d\n\n"
               "V8: %d\tV9: %d\tV10: %d\tV11: %d\t"
               "V12: %d\tV13: %d\tV14: %d\tV15: %d",
@@ -42,20 +49,27 @@ InterpreterLoop (void)
               core.v[4], core.v[5], core.v[6], core.v[7],
               core.v[8], core.v[9], core.v[10], core.v[11],
               core.v[12], core.v[13], core.v[14], core.v[15]);
-     
-     gtk_label_set_text(GTK_LABEL(vLabel), str);
 
-     str[0] = '\0';
+     if (GTK_IS_LABEL(vLabel))
+          gtk_label_set_text(GTK_LABEL(vLabel), regStr);
 
-     snprintf(str, sizeof(str), "DT: %d\n\nST: %d\n\nSP: %d\n\nPC: 0x%3x\n\nI: 0x%3x\n\nStack: 0x%3xd\n\n",
+     // Clear reg string and reuse it for other registers
+     regStr[0] = '\0';
+
+     snprintf(regStr, sizeof(regStr), "DT: %d\n\nST: %d\n\nSP: %d\n\nPC: 0x%03x\n\nI: 0x%03x\n\nStack: 0x%03xd\n\n",
               core.dt, core.st, core.sp, core.pc, core.i, core.stack[core.sp]);
 
-     gtk_label_set_text(GTK_LABEL(coreLabel), str);
+     if (GTK_IS_LABEL(coreLabel)) 
+          gtk_label_set_text(GTK_LABEL(coreLabel), regStr);
+
      gtk_window_set_title(GTK_WINDOW(mainWindow), "C8");
 
      if (stepping) {
           interpreting = 0;
           stepping = 0;
+
+          // lineNum = table[core.pc];
+          // move to line in code
      }
 
      return TRUE;
@@ -88,10 +102,8 @@ Draw (GtkWidget* widget, cairo_t* cr, gpointer data)
 }
 
 static void
-Destroy (GtkApplication* app, gpointer userData)
+DestroyApplication (GtkApplication* app, gpointer userData)
 {
-     interpreting = 0;
-
      exit(1);
 }
 
@@ -246,21 +258,19 @@ Activate (GtkApplication* app, gpointer userData)
      GtkWidget* frame;
      GdkColor black = { 0, 0, 0, 0 };
 
-     GtkWidget* scroll, *codeView;
-     GtkWidget* debugGrid, *labelGrid;
+     GtkWidget* scroll, *codeView, *pcListBox; 
+     GtkWidget* debugGrid, *labelGrid, *scrollGrid;
 
      GtkWidget* buttonBox;
      GtkWidget* pauseButton, *stepButton;
+
+     GtkTextBuffer* buffer;
 
      mainWindow = gtk_application_window_new(app);
      gtk_window_set_title(GTK_WINDOW(mainWindow), "C8");
      gtk_widget_set_size_request(GTK_WIDGET(mainWindow), (SCREEN_WIDTH*DRAWING_AREA_SCALE)+WINDOW_WIDTH_OFFSET, (SCREEN_HEIGHT*DRAWING_AREA_SCALE)+WINDOW_HEIGHT_OFFSET);
      gtk_window_set_resizable(GTK_WINDOW(mainWindow), FALSE);
      gtk_container_set_border_width(GTK_CONTAINER(mainWindow), WINDOW_BORDER_WIDTH);
-
-     g_signal_connect(G_OBJECT(mainWindow), "destroy", G_CALLBACK(Destroy), NULL);
-     g_signal_connect(G_OBJECT(mainWindow), "key-press-event", G_CALLBACK(KeyPress), NULL);
-     g_signal_connect(G_OBJECT(mainWindow), "key-release-event", G_CALLBACK(KeyRelease), NULL);
 
      frame = gtk_frame_new(NULL);
      gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_IN);
@@ -283,6 +293,7 @@ Activate (GtkApplication* app, gpointer userData)
      // Create window and label grids
      debugGrid = gtk_grid_new();
      labelGrid = gtk_grid_new();
+     scrollGrid = gtk_grid_new();
      gtk_container_add(GTK_CONTAINER(debugWindow), debugGrid);
 
      // Create buttonbox and buttons
@@ -293,34 +304,68 @@ Activate (GtkApplication* app, gpointer userData)
      gtk_container_add(GTK_CONTAINER(buttonBox), pauseButton);
      gtk_container_add(GTK_CONTAINER(buttonBox), stepButton);
 
-     g_signal_connect(G_OBJECT(pauseButton), "clicked", G_CALLBACK(PauseClicked), NULL);
-     g_signal_connect(G_OBJECT(stepButton), "clicked", G_CALLBACK(StepClicked), NULL);
-
-     vLabel = gtk_label_new("");
-     coreLabel = gtk_label_new("");
+     vLabel = gtk_label_new(NULL);
+     coreLabel = gtk_label_new(NULL);
 
      // Create scrolled window for textview
      scroll = gtk_scrolled_window_new(NULL, NULL);
      gtk_widget_set_hexpand(scroll, TRUE);
      gtk_widget_set_vexpand(scroll, TRUE);
 
+     PangoFontDescription* fontDesc;
+     fontDesc = pango_font_description_from_string("Monospace 12");
+
      // Create code textview
      codeView = gtk_text_view_new();
-     gtk_text_view_set_editable(GTK_TEXT_VIEW (codeView), FALSE);
-     gtk_container_add(GTK_CONTAINER(scroll), codeView);
+     gtk_text_view_set_editable(GTK_TEXT_VIEW(codeView), FALSE);
+     gtk_widget_modify_font(codeView, fontDesc);
+     //gtk_text_view_set_monospace(GTK_TEXT_VIEW(codeView), TRUE);
+     
+     gtk_container_add(GTK_CONTAINER(scroll), scrollGrid);
+
+     pcListBox = gtk_list_box_new();
+
+     fontDesc = pango_font_description_from_string("Monospace 10");
+
+     for (int i = 0x200; i < 0x200 + pcEnd; i += 2) {
+          char str[12];
+
+          snprintf(str, sizeof(str), "0x%03x  ", i);
+          GtkWidget* label = gtk_label_new(str);
+          gtk_widget_modify_font(label, fontDesc);
+
+          gtk_list_box_insert(pcListBox, label, -1);
+     }
+
+     pango_font_description_free(fontDesc);
 
      // Attach widgets to debug window grid
-     gtk_grid_attach(debugGrid, buttonBox, 0, 0, 1, 1);
-     gtk_grid_attach(debugGrid, coreLabel, 0, 1, 1, 1);
-     gtk_grid_attach(debugGrid, labelGrid, 1, 0, 1, 1);
-     gtk_grid_attach(debugGrid, scroll,    1, 1, 1, 1);
+     gtk_grid_attach(GTK_GRID(debugGrid), buttonBox, 0, 0, 1, 1);
+     gtk_grid_attach(GTK_GRID(debugGrid), coreLabel, 0, 1, 1, 1);
+     gtk_grid_attach(GTK_GRID(debugGrid), labelGrid, 1, 0, 1, 1);
+     gtk_grid_attach(GTK_GRID(debugGrid), scroll,    1, 1, 1, 1);
+
+     // Attach widgets to scrolled window grid
+     gtk_grid_attach(GTK_GRID(scrollGrid), pcListBox, 0, 0, 1, 1);
+     gtk_grid_attach(GTK_GRID(scrollGrid), codeView,  1, 0, 1, 1); 
 
      // Attach labels to label grid
-     gtk_grid_attach(labelGrid, vLabel, 0, 0, 1, 1);
+     gtk_grid_attach(GTK_GRID(labelGrid), vLabel, 0, 0, 1, 1);
+
+     // Write program disassembly to text view
+     buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(codeView));
+     gtk_text_buffer_set_text(buffer, disassemblyText, sizeof(char) * strlen(disassemblyText));
 
      gtk_widget_show_all(debugWindow);
 
-     g_timeout_add(1, InterpreterLoop, NULL);
+     g_signal_connect(G_OBJECT(mainWindow), "destroy", G_CALLBACK(DestroyApplication), NULL);
+     g_signal_connect(G_OBJECT(mainWindow), "key-press-event", G_CALLBACK(KeyPress), NULL);
+     g_signal_connect(G_OBJECT(mainWindow), "key-release-event", G_CALLBACK(KeyRelease), NULL);
+
+     g_signal_connect(G_OBJECT(pauseButton), "clicked", G_CALLBACK(PauseClicked), NULL);
+     g_signal_connect(G_OBJECT(stepButton), "clicked", G_CALLBACK(StepClicked), NULL);
+
+     g_timeout_add(1,  InterpreterLoop, NULL);
      g_timeout_add(17, Redraw, NULL);
 }
 
@@ -335,6 +380,8 @@ main (int argc, char* argv[])
      }
 
      CHIP8_StartExecution();
+
+     CHIP8_BuildInstructionTable(disassemblyText, &pcEnd); 
 
      // TODO: Create a proper application ID 
      app = gtk_application_new("com.test.c8", G_APPLICATION_FLAGS_NONE);

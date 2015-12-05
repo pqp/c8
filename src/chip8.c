@@ -33,11 +33,13 @@ static uint8_t digits[] = {
 struct chip8_core core;
 struct platform_interface_t pi;
 
-static unsigned char program[512];
+static unsigned char* program;
 static unsigned programSize;
 
+static unsigned numOfInst = 0;
+
 static int
-LoadProgram (const char* filename, unsigned* programSize)
+LoadProgram (const char* filename)
 {
      FILE* programFile;
 
@@ -54,16 +56,60 @@ LoadProgram (const char* filename, unsigned* programSize)
      const long fileSize = ftell(programFile);
      rewind(programFile);
 
-     const int status = fread(&program, fileSize, 1, programFile);
+     // Should there be a program size limit?
+
+     program = malloc(sizeof(char) * fileSize);
+     if (!program) {
+          printf("Failed to allocate memory for program storage.\n");
+          return 0;
+     }
+
+     const int status = fread(program, fileSize, 1, programFile);
 
      if (status < 1) {
           printf("Failed to read program into memory.\n");
           return 0;
      }
 
-     *programSize = fileSize;
+     printf("Loaded %s (%d bytes)..\n", filename, fileSize);
+
+     programSize = fileSize;
 
      return 1;
+}
+
+static void
+printd (char* str, ...)
+{
+     #ifdef DEBUG
+     char final[256];
+
+     va_list args;
+     va_start(args, str);
+     vsnprintf(final, sizeof(final), str, args);
+     va_end(args);
+    
+     printf("PC 0x%x: %s", core.pc, final);
+     #endif
+}
+
+static void
+AppendToBuffer (char* buffer, const char* str, ...)
+{
+     char final[256];
+
+     numOfInst++;
+
+     va_list args;
+     va_start(args, str);
+     vsnprintf(final, sizeof(final), str, args);
+     va_end(args);
+
+     // TODO: Verify that vsnprintf works here
+
+     strncat(buffer, final, strlen(final));
+
+     // TODO: Verify that strncat does not exceed bounds of buffer
 }
 
 int
@@ -74,7 +120,7 @@ CHIP8_Main (int argc, char* argv[])
           return 0;
      }
 
-     int result = LoadProgram(argv[1], &programSize);
+     int result = LoadProgram(argv[1]);
 
      if (!result) {
           return 0;
@@ -87,7 +133,7 @@ CHIP8_Main (int argc, char* argv[])
    Load hex digit bitmaps and program into CHIP-8 system memory.
 */
 void
-CHIP8_LoadProgramIntoRAM (const unsigned char* program, const unsigned programSize)
+CHIP8_LoadProgramIntoRAM (unsigned char* program, const unsigned programSize)
 {
      void* digitDest = memcpy(core.mem, digits, sizeof(digits));
 
@@ -101,20 +147,137 @@ CHIP8_LoadProgramIntoRAM (const unsigned char* program, const unsigned programSi
      if (!programDest) {
           printf("Failed to copy program into CHIP-8 core memory.\n");
      }
+
+     free(program);
 }
 
-static void
-printd (char* str, ...)
+void
+CHIP8_BuildInstructionTable (char* buffer, uint16_t* end)
 {
-     #ifdef DEBUG
-     char final[256];
-     va_list args;
-     va_start(args, str);
-     vsnprintf(final, sizeof(final), str, args);
-     va_end(args);
-    
-     printf("PC 0x%x: %s", core.pc, final);
-     #endif
+     // If I pass the program counter to the table,
+     // it should return the line index to me,
+     // and highlight that line in the debugger.
+     for (int i = PROGRAM_LOC_OFFSET; i < PROGRAM_LOC_OFFSET+programSize; i += 2) {
+          uint16_t opcode = 0;
+          opcode |= core.mem[i];
+          opcode <<= 8;
+          opcode |= core.mem[i + 1];
+
+          const unsigned x       = (opcode & 0x0F00) >> 8;
+          const unsigned y       = (opcode & 0x00F0) >> 4;
+          const unsigned data    = (opcode & 0x00FF);
+          const unsigned address = (opcode & 0x0FFF);
+
+          *end = i;
+
+          //table[core.pc] = line;
+          switch (opcode)
+          {
+          case 0x00E0:
+               AppendToBuffer(buffer, "CLS\n");
+               break;
+               
+          case 0x00EE:
+               AppendToBuffer(buffer, "RET\n");
+               break;
+          }
+
+          switch (opcode & 0xF000)
+          {
+          case 0x1000:
+               AppendToBuffer(buffer, "JP 0x%03x\n", address);
+               break;
+          case 0x2000:
+               AppendToBuffer(buffer, "CALL 0x%03x\n", address);
+               break;
+          case 0x3000:
+               AppendToBuffer(buffer, "SE V%d, 0x%03x (%d)\n", x, data, data);
+               break;
+          case 0x4000:
+               AppendToBuffer(buffer, "SNE V%d, 0x%03x (%d)\n", x, data, data);
+               break;
+          case 0x5000:
+               AppendToBuffer(buffer, "SE V%d, V%d\n", x, y);
+               break;
+          case 0x6000:
+               AppendToBuffer(buffer, "LD V%d, 0x%03x (%d)\n", x, data, data);
+               break;
+          case 0x7000:
+               AppendToBuffer(buffer, "ADD V%d, 0x%03x (%d)\n", x, data, data);
+               break;
+          case 0x8000:
+               switch (opcode & 0x000F)
+               {
+               case 0x0:
+                    AppendToBuffer(buffer, "LD V%d, V%d\n", x, y);
+                    break;
+               case 0x1:
+                    AppendToBuffer(buffer, "OR V%d, V%d\n", x, y);
+                    break;
+               case 0x2:
+                    AppendToBuffer(buffer, "AND V%d, V%d\n", x, y);
+                    break;
+               case 0x3:
+                    AppendToBuffer(buffer, "XOR V%d, V%d\n", x, y);
+                    break;
+               case 0x4:
+                    AppendToBuffer(buffer, "ADD V%d, V%d\n", x, y);
+                    break;
+               case 0x5:
+                    AppendToBuffer(buffer, "SUB V%d, V%d\n", x, y);
+                    break;
+               case 0x6:
+                    AppendToBuffer(buffer, "0x8xy6: NOT IMPLEMENTED\n");
+                    break;
+               case 0x7:
+                    AppendToBuffer(buffer, "SUBN V%d, V%d\n", x, y);
+                    break;
+               case 0xE:
+                    AppendToBuffer(buffer, "0x8xyE: NOT DOCUMENTED\n");
+                    break;
+               default:
+                    break;
+               }
+               break;
+          case 0x9000:
+               AppendToBuffer(buffer, "SNE V%d, V%d\n", x, y);
+               break;
+          case 0xA000:
+               AppendToBuffer(buffer, "LD I, 0x%03x\n", core.i, address);
+               break;
+          case 0xB000:
+               AppendToBuffer(buffer, "JP V0, 0x%03x\n", address);
+               break;
+          case 0xC000:
+               AppendToBuffer(buffer, "RND V%d, 0x%03x (%d)\n", x, data, data);
+               break;
+          case 0xD000:
+               AppendToBuffer(buffer, "DRW V%d, V%d, %d\n", x, y, opcode & 0x000F);
+               break;
+          case 0xE000:
+               switch (data)
+               {
+               case 0x9E:
+                    AppendToBuffer(buffer, "SKP V%d\n", x);
+                    break;
+               case 0xA1:
+                    AppendToBuffer(buffer, "SKNP V%d\n", x);
+                    break;
+               }
+          case 0xF000:
+               switch (data)
+               {
+               case 0x07:
+                    AppendToBuffer(buffer, "LD V%d, DT\n", x);
+                    break;
+               }
+          }
+
+     }
+
+     // after we build the table
+
+     printf("Disassembled %d instructions (out of %d total instructions).\n", numOfInst, programSize / 2);
 }
 
 void
@@ -141,8 +304,10 @@ CHIP8_FetchAndDecodeOpcode (void)
           return -1;
      }
 
-     const unsigned x = (opcode & 0x0F00) >> 8;
-     const unsigned y = (opcode & 0x00F0) >> 4;
+     const unsigned x       = (opcode & 0x0F00) >> 8;
+     const unsigned y       = (opcode & 0x00F0) >> 4;
+     const unsigned data    = (opcode & 0x00FF);
+     const unsigned address = (opcode & 0x0FFF);
 
      switch (opcode)
      {
@@ -168,7 +333,7 @@ CHIP8_FetchAndDecodeOpcode (void)
             Return from a subroutine.
           */
 
-          printd("0x00EE: Return from a subroutine(return to stack[%d], address 0x%3x)\n", core.sp - 1, core.stack[core.sp-1]);
+          printd("0x00EE: Return from a subroutine(return to stack[%d], address 0x%03x)\n", core.sp - 1, core.stack[core.sp-1]);
                     
           if (core.sp - 1 < 0) {
                printf("0x00EE: Stack underflow. Halting!\n");
@@ -191,9 +356,8 @@ CHIP8_FetchAndDecodeOpcode (void)
             Jump to location nnn.
           */
      {
-          const unsigned address = (opcode & 0x0FFF);
 
-          printd("0x1000: Jump to 0x%3x\n", address);
+          printd("0x1000: Jump to 0x%03x\n", address);
 
           core.pc = address;
           return 0;
@@ -205,9 +369,7 @@ CHIP8_FetchAndDecodeOpcode (void)
           */
 
      {
-          const unsigned address = (opcode & 0x0FFF);
-
-          printd("0x2000: Call subroutine at 0x%3x (put 0x%3x on stack[%d])\n", address, core.pc, core.sp);
+          printd("0x2000: Call subroutine at 0x%03x (put 0x%03x on stack[%d])\n", address, core.pc, core.sp);
                
           core.stack[core.sp++] = core.pc;
           core.pc = address;
@@ -221,7 +383,6 @@ CHIP8_FetchAndDecodeOpcode (void)
           */
 
      {
-          const unsigned data = (opcode & 0x00FF);
 
           printd("0x3000: Skip next instruction if V%d(%d) = %d\n", x, core.v[x], data);
 
@@ -236,8 +397,6 @@ CHIP8_FetchAndDecodeOpcode (void)
             Skip next instruction if Vx != kk.
           */
      {
-          const unsigned data = (opcode & 0x00FF);
-
           printd("0x4000: Skip next instruction if V%d(%d) != %d\n", x, core.v[x], data);
 
           if (core.v[x] != data)
@@ -264,8 +423,6 @@ CHIP8_FetchAndDecodeOpcode (void)
             Set Vx = kk.
           */
      {
-          const unsigned data = (opcode & 0x00FF);
-
           printd("0x6000: Set V%d(%d) = %d\n", x, core.v[x], data);
 
           core.v[x] = data;
@@ -278,8 +435,6 @@ CHIP8_FetchAndDecodeOpcode (void)
             Set Vx = Vx + kk.
           */
      {
-          const unsigned data = (opcode & 0x00FF);
-
           printd("0x7000: Set V%d(%d) = V%d + %d (%d)\n", x, core.v[x], x, data, core.v[x] + data);
 
           core.v[x] += data;
@@ -381,7 +536,7 @@ CHIP8_FetchAndDecodeOpcode (void)
                core.v[x] = (core.v[x] >> 7) & 1;
                break;
           default:
-               printd("Unknown 0x8000 variation 0x%3x.\n", opcode & 0x000F);
+               printd("Unknown 0x8000 variation 0x%03x.\n", opcode & 0x000F);
                return -1;
                break;
           }
@@ -406,7 +561,7 @@ CHIP8_FetchAndDecodeOpcode (void)
             Set I = nnn.
           */
      {
-          printd("0xAnnn: Set I(0x%3x) = nnn(0x%3x)\n", core.i, opcode & 0x0FFF);
+          printd("0xAnnn: Set I(0x%03x) = nnn(0x%03x)\n", core.i, opcode & 0x0FFF);
           core.i = (opcode & 0x0FFF);
           break;
      }
@@ -426,8 +581,6 @@ CHIP8_FetchAndDecodeOpcode (void)
             Set Vx = random byte AND kk.
           */
      {
-          const unsigned data = (opcode & 0x00FF);
-
           printd("0xC000: Set V%d(%d) = random byte and kk(%d).\n", data);
           break;
      }
@@ -512,13 +665,19 @@ CHIP8_FetchAndDecodeOpcode (void)
           switch (opcode & 0x00FF)
           {
           case 0x07:
-               // Set Vx = delay timer value. 
+               /*
+                 Fx07 - LD Vx, DT
+                 Set Vx = delay timer value. 
+               */
 
                printd("0xFx07: Set V%d(%d) = delay timer(%d).\n", x, core.v[x], core.dt);
                core.v[x] = core.dt;
                break;
           case 0x0A:
-               // Wait for a key press, store the value of the key in Vx. 
+               /*
+                 Fx0A - LD Vx, K
+                 Wait for a key press, store the value of the key in Vx. 
+               */
 
                printd("0xFx0A: Wait for key press, store value of key (%d) in V%d(%d).\n");
 
@@ -528,7 +687,10 @@ CHIP8_FetchAndDecodeOpcode (void)
 
                break;
           case 0x15:
-               // Set delay timer = Vx.
+               /*
+                 Fx15 - LD DT, Vx
+                 Set delay timer = Vx.
+               */
 
                printd("0xFx15: Set delay timer(%d) = V%d(%d)\n", core.dt, x, core.v[x]);
                core.dt = core.v[x];
@@ -538,32 +700,32 @@ CHIP8_FetchAndDecodeOpcode (void)
                core.st = core.v[x];
                break;
           case 0x1E:
-               printd("0xFx1E: Set I(0x%3x) = I(%d) + V%d(%d)\n", core.i, core.i, x, core.v[x]);
+               printd("0xFx1E: Set I(0x%03x) = I(%d) + V%d(%d)\n", core.i, core.i, x, core.v[x]);
                core.i += core.v[x];
                break;
           case 0x29:
-               printd("0xFx29: Set I(0x%3x) = %d sprite address (0x%3x)\n", core.i, core.v[x], (core.v[x] * 5));
+               printd("0xFx29: Set I(0x%03x) = %d sprite address (0x%03x)\n", core.i, core.v[x], (core.v[x] * 5));
                core.i = core.v[x] * 5;
                break;
           case 0x33:
-               printd("0xFx33: Store BCD representation of V%d(%d) in memory locations I(0x%3x), I+1(0x%3x), I+2(0x%3x)\n", x, core.v[x], core.i, core.i+1, core.i+2);
+               printd("0xFx33: Store BCD representation of V%d(%d) in memory locations I(0x%03x), I+1(0x%03x), I+2(0x%03x)\n", x, core.v[x], core.i, core.i+1, core.i+2);
                core.mem[core.i]   = (core.v[x] % 1000) / 100;
                core.mem[core.i+1] = (core.v[x] % 100) / 10;
                core.mem[core.i+2] = (core.v[x] % 10);
-               printd("0xFx33: Wrote %d at 0x%3x\n", (core.v[x] % 1000) / 100, core.i);
-               printd("0xFx33: Wrote %d at 0x%3x\n", (core.v[x] % 100) / 10, core.i+1);
-               printd("0xFx33: Wrote %d at 0x%3x\n", (core.v[x] % 10), core.i+2);
+               printd("0xFx33: Wrote %d at 0x%03x\n", (core.v[x] % 1000) / 100, core.i);
+               printd("0xFx33: Wrote %d at 0x%03x\n", (core.v[x] % 100) / 10, core.i+1);
+               printd("0xFx33: Wrote %d at 0x%03x\n", (core.v[x] % 10), core.i+2);
                break;
           case 0x55:
-               printd("0xFx55: Store registers V0 through V%d in memory starting at location 0x%3x\n", x, core.i);
+               printd("0xFx55: Store registers V0 through V%d in memory starting at location 0x%03x\n", x, core.i);
                for (int j = 0; j <= x; j++) {
-                    printd("0xFx55: Store V%d(%d) at 0x%3x\n", j, core.v[j], core.i+j);
+                    printd("0xFx55: Store V%d(%d) at 0x%03x\n", j, core.v[j], core.i+j);
                     core.mem[core.i+j] = core.v[j];
                }
                break;
           case 0x65:
           {
-               printd("0xFx65: Read registers V0 through V%d from memory starting at location 0x%3x\n", x, core.i);
+               printd("0xFx65: Read registers V0 through V%d from memory starting at location 0x%03x\n", x, core.i);
                for (int j = 0; j <= x; j++) {
                     printd("0xFx65: Read %d into V%d\n", core.mem[core.i+j], j);
                     core.v[j] = core.mem[core.i+j];
