@@ -13,4 +13,6 @@ struct platform_interface_t {
 extern struct chip8_core core;
 extern struct platform_interface_t pi;
 
+extern unsigned programSize;
+
 #endif

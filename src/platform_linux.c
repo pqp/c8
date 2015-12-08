@@ -257,7 +257,7 @@ static void
 Activate (GtkApplication* app, gpointer userData)
 {
      GtkWidget* frame;
-     GdkColor black = { 0, 0, 0, 0 };
+     GdkColor black = { 0, 0, 0, 1 };
 
      GtkWidget* scroll, *codeView, *pcListBox; 
      GtkWidget* debugGrid, *labelGrid, *scrollGrid;
@@ -328,14 +328,14 @@ Activate (GtkApplication* app, gpointer userData)
 
      fontDesc = pango_font_description_from_string("Monospace 10");
 
-     for (int i = 0x200; i < pcEnd; i += 2) {
+     for (int i = PROGRAM_LOC_OFFSET; i < PROGRAM_LOC_OFFSET+programSize; i += 2) {
           char str[12]; 
 
           snprintf(str, sizeof(str), "0x%03x  ", i);
           GtkWidget* label = gtk_label_new(str);
           gtk_widget_modify_font(label, fontDesc);
 
-          gtk_list_box_insert(pcListBox, label, -1);
+          gtk_list_box_insert(GTK_LIST_BOX(pcListBox), label, -1);
      }
 
      pango_font_description_free(fontDesc);
@@ -382,7 +382,7 @@ main (int argc, char* argv[])
 
      CHIP8_StartExecution();
 
-     CHIP8_BuildInstructionTable(disassemblyText, &pcEnd); 
+     CHIP8_BuildInstructionTable(disassemblyText);  
 
      // TODO: Create a proper application ID 
      app = gtk_application_new("com.test.c8", G_APPLICATION_FLAGS_NONE);

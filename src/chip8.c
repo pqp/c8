@@ -33,8 +33,9 @@ static uint8_t digits[] = {
 struct chip8_core core;
 struct platform_interface_t pi;
 
+unsigned programSize;
+
 static unsigned char* program;
-static unsigned programSize;
 
 static unsigned numOfInst = 0;
 
@@ -152,7 +153,7 @@ CHIP8_LoadProgramIntoRAM (unsigned char* program, const unsigned programSize)
 }
 
 void
-CHIP8_BuildInstructionTable (char* buffer, uint16_t* end)
+CHIP8_BuildInstructionTable (char* buffer)
 {
      // If I pass the program counter to the table,
      // it should return the line index to me,
@@ -168,8 +169,6 @@ CHIP8_BuildInstructionTable (char* buffer, uint16_t* end)
           const unsigned data    = (opcode & 0x00FF);
           const unsigned address = (opcode & 0x0FFF);
 
-          *end = i;
-
           //table[core.pc] = line;
           switch (opcode)
           {
@@ -184,6 +183,9 @@ CHIP8_BuildInstructionTable (char* buffer, uint16_t* end)
 
           switch (opcode & 0xF000)
           {
+          default:
+               AppendToBuffer(buffer, "UNKNOWN OPCODE\n");
+               break;
           case 0x1000:
                AppendToBuffer(buffer, "JP 0x%03x\n", address);
                break;
@@ -269,6 +271,24 @@ CHIP8_BuildInstructionTable (char* buffer, uint16_t* end)
                {
                case 0x07:
                     AppendToBuffer(buffer, "LD V%d, DT\n", x);
+                    break;
+               case 0x0A:
+                    AppendToBuffer(buffer, "LD V%d, key\n", x);
+                    break;
+               case 0x15:
+                    AppendToBuffer(buffer, "LD DT, V%d\n", x);
+                    break;
+               case 0x18:
+                    AppendToBuffer(buffer, "LD ST, V%x\n", x);
+                    break;
+               case 0x1E:
+                    AppendToBuffer(buffer, "ADD I, V%d\n", x);
+                    break;
+               case 0x29:
+                    AppendToBuffer(buffer, "LD F, V%d\n", x);
+                    break;
+               case 0x33:
+                    AppendToBuffer(buffer, "LD B, V%d\n", x);
                     break;
                }
           }
