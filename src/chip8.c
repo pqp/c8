@@ -71,7 +71,7 @@ LoadProgram (const char* filename)
           return 0;
      }
 
-     printf("Loaded %s (%ld bytes)..\n", filename, fileSize);
+     printf("Loaded %s (%d bytes)..\n", filename, fileSize);
 
      programSize = fileSize;
 
