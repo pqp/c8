@@ -23,6 +23,7 @@ static GtkWidget* vLabel, *coreLabel;
 static char regStr[1024];
 
 // Disassembly of program code
+// TODO: Need dynamically sized array here
 static char disassemblyText[2048];
 
 static uint16_t pcEnd;
@@ -327,8 +328,8 @@ Activate (GtkApplication* app, gpointer userData)
 
      fontDesc = pango_font_description_from_string("Monospace 10");
 
-     for (int i = 0x200; i < 0x200 + pcEnd; i += 2) {
-          char str[12];
+     for (int i = 0x200; i < pcEnd; i += 2) {
+          char str[12]; 
 
           snprintf(str, sizeof(str), "0x%03x  ", i);
           GtkWidget* label = gtk_label_new(str);
