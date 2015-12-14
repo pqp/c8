@@ -19,10 +19,12 @@
 #define SCREEN_WIDTH 64
 #define SCREEN_HEIGHT 32
 
+#define VNUM 16
+
 // Our implementation of a CHIP-8 system.
 struct chip8_core {
      uint8_t  mem[MEM_SIZE];
-     uint8_t  v[16];
+     uint8_t  v[VNUM];
      uint8_t  vidmem[SCREEN_HEIGHT][SCREEN_WIDTH];
 
      uint8_t  dt; // delay timer

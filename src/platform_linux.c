@@ -17,7 +17,8 @@ static int stepping = 0;
 
 static GtkWidget* mainWindow, *drawingArea;
 static GtkWidget* debugWindow;
-static GtkWidget* vLabel, *coreLabel;
+
+static GtkWidget* vLabels[VNUM];
 
 // Contents of V registers for debugger
 static char regStr[1024];
@@ -25,8 +26,6 @@ static char regStr[1024];
 // Disassembly of program code
 // TODO: Need dynamically sized array here
 static char disassemblyText[2048];
-
-static uint16_t pcEnd;
 
 static gboolean
 InterpreterLoop (gpointer data)
@@ -37,31 +36,24 @@ InterpreterLoop (gpointer data)
           return TRUE;
      }
 
+     // Close if interpreter core fails
      if (CHIP8_FetchAndDecodeOpcode() < 0) {
           exit(1);
      }
 
-     snprintf(regStr, sizeof(regStr),
-              "V0: %d\tV1: %d\tV2: %d\tV3: %d\t"
-              "V4: %d\tV5: %d\tV6: %d\tV7: %d\n\n"
-              "V8: %d\tV9: %d\tV10: %d\tV11: %d\t"
-              "V12: %d\tV13: %d\tV14: %d\tV15: %d",
-              core.v[0], core.v[1], core.v[2], core.v[3],
-              core.v[4], core.v[5], core.v[6], core.v[7],
-              core.v[8], core.v[9], core.v[10], core.v[11],
-              core.v[12], core.v[13], core.v[14], core.v[15]);
+     // Update V register displays
+     for (int i = 0; i < VNUM; i++) {
+          char str[4];
 
-     if (GTK_IS_LABEL(vLabel))
-          gtk_label_set_text(GTK_LABEL(vLabel), regStr);
+          snprintf(str, sizeof(str), "%d", core.v[i]);
+          gtk_label_set_text(vLabels[i], str);
+     }
 
      // Clear reg string and reuse it for other registers
      regStr[0] = '\0';
 
      snprintf(regStr, sizeof(regStr), "DT: %d\n\nST: %d\n\nSP: %d\n\nPC: 0x%03x\n\nI: 0x%03x\n\nStack: 0x%03xd\n\n",
               core.dt, core.st, core.sp, core.pc, core.i, core.stack[core.sp]);
-
-     if (GTK_IS_LABEL(coreLabel)) 
-          gtk_label_set_text(GTK_LABEL(coreLabel), regStr);
 
      gtk_window_set_title(GTK_WINDOW(mainWindow), "C8");
 
@@ -256,14 +248,19 @@ StepClicked (void)
 static void
 Activate (GtkApplication* app, gpointer userData)
 {
-     GtkWidget* frame;
+     GtkWidget* displayFrame, *vFrame, *coreFrame;
      GdkColor black = { 0, 0, 0, 1 };
 
      GtkWidget* scroll, *codeView, *pcListBox; 
-     GtkWidget* debugGrid, *labelGrid, *scrollGrid;
+     GtkWidget* debugGrid, *vGrid, *coreGrid, *scrollGrid;
+
+     GtkWidget* mainBox;
 
      GtkWidget* buttonBox;
      GtkWidget* pauseButton, *stepButton;
+
+     GtkWidget* menuBar, *menuItem;
+
 
      GtkTextBuffer* buffer;
 
@@ -273,9 +270,17 @@ Activate (GtkApplication* app, gpointer userData)
      gtk_window_set_resizable(GTK_WINDOW(mainWindow), FALSE);
      gtk_container_set_border_width(GTK_CONTAINER(mainWindow), WINDOW_BORDER_WIDTH);
 
-     frame = gtk_frame_new(NULL);
-     gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_IN);
-     gtk_container_add(GTK_CONTAINER(mainWindow), frame);
+     mainBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+     displayFrame = gtk_frame_new(NULL);
+     gtk_frame_set_shadow_type(GTK_FRAME(displayFrame), GTK_SHADOW_IN);
+
+     menuBar = gtk_menu_bar_new();
+     gtk_widget_set_hexpand(menuBar, TRUE);
+     gtk_widget_show(menuBar);
+
+     menuItem = gtk_menu_item_new_with_label("Test");
+     gtk_menu_shell_append(GTK_MENU_SHELL(menuBar), menuItem);
 
      drawingArea = gtk_drawing_area_new();
      gtk_widget_set_size_request(GTK_WIDGET(drawingArea), SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -283,7 +288,12 @@ Activate (GtkApplication* app, gpointer userData)
      gtk_widget_modify_bg(GTK_WIDGET(drawingArea), GTK_STATE_NORMAL, &black);
      g_signal_connect (G_OBJECT(drawingArea), "draw",
                        G_CALLBACK(Draw), NULL);
-     gtk_container_add(GTK_CONTAINER(frame), drawingArea);
+     gtk_container_add(GTK_CONTAINER(displayFrame), drawingArea);
+
+     gtk_box_pack_start(GTK_BOX(mainBox), menuBar, TRUE, TRUE, 0);
+     gtk_box_pack_end(GTK_BOX(mainBox), displayFrame, TRUE, TRUE, 0);
+
+     gtk_container_add(GTK_CONTAINER(mainWindow), mainBox);
 
      gtk_widget_show_all(mainWindow);
 
@@ -292,9 +302,14 @@ Activate (GtkApplication* app, gpointer userData)
      gtk_window_set_title(GTK_WINDOW(debugWindow), "Debugger");
 
      // Create window and label grids
-     debugGrid = gtk_grid_new();
-     labelGrid = gtk_grid_new();
+     debugGrid  = gtk_grid_new();
+     vGrid      = gtk_grid_new();
+     coreGrid   = gtk_grid_new();
      scrollGrid = gtk_grid_new();
+
+     vFrame = gtk_frame_new(NULL);
+     coreFrame = gtk_frame_new(NULL);
+
      gtk_container_add(GTK_CONTAINER(debugWindow), debugGrid);
 
      // Create buttonbox and buttons
@@ -304,9 +319,6 @@ Activate (GtkApplication* app, gpointer userData)
      stepButton = gtk_button_new_with_label("Step");
      gtk_container_add(GTK_CONTAINER(buttonBox), pauseButton);
      gtk_container_add(GTK_CONTAINER(buttonBox), stepButton);
-
-     vLabel = gtk_label_new(NULL);
-     coreLabel = gtk_label_new(NULL);
 
      // Create scrolled window for textview
      scroll = gtk_scrolled_window_new(NULL, NULL);
@@ -318,9 +330,9 @@ Activate (GtkApplication* app, gpointer userData)
 
      // Create code textview
      codeView = gtk_text_view_new();
+     gtk_widget_set_hexpand(codeView, TRUE);
      gtk_text_view_set_editable(GTK_TEXT_VIEW(codeView), FALSE);
      gtk_widget_modify_font(codeView, fontDesc);
-     //gtk_text_view_set_monospace(GTK_TEXT_VIEW(codeView), TRUE);
      
      gtk_container_add(GTK_CONTAINER(scroll), scrollGrid);
 
@@ -338,20 +350,55 @@ Activate (GtkApplication* app, gpointer userData)
           gtk_list_box_insert(GTK_LIST_BOX(pcListBox), label, -1);
      }
 
+     for (int i = 0; i < VNUM; i++) {
+          char v[4];
+
+          snprintf(v, sizeof(v), "V%d", i);
+          GtkWidget* label = gtk_label_new(v);
+
+          gtk_grid_attach(GTK_GRID(vGrid), label, 0, i, 1, 1);
+     }
+
+     for (int i = 0; i < VNUM; i++) {
+          vLabels[i] = gtk_label_new(NULL);
+          gtk_label_set_width_chars(vLabels[i], 10);
+
+          gtk_grid_attach(GTK_GRID(vGrid), vLabels[i], 1, i, 1, 1);
+     }
+
+     // This is ugly.
+     GtkWidget* label = gtk_label_new("DT");
+     gtk_label_set_width_chars(label, 10);
+     gtk_grid_attach(GTK_GRID(coreGrid), label, 0, 0, 1, 1);
+     label = gtk_label_new("ST");
+     gtk_grid_attach(GTK_GRID(coreGrid), label, 1, 0, 1, 1);
+     gtk_label_set_width_chars(label, 10);
+     label = gtk_label_new("SP");
+     gtk_grid_attach(GTK_GRID(coreGrid), label, 2, 0, 1, 1);
+     gtk_label_set_width_chars(label, 10);
+     label = gtk_label_new("PC");
+     gtk_grid_attach(GTK_GRID(coreGrid), label, 3, 0, 1, 1);
+     gtk_label_set_width_chars(label, 10);
+     label = gtk_label_new("I");
+     gtk_grid_attach(GTK_GRID(coreGrid), label, 4, 0, 1, 1);
+     gtk_label_set_width_chars(label, 10);
+     label = gtk_label_new("Stack");
+     gtk_grid_attach(GTK_GRID(coreGrid), label, 5, 0, 1, 1);
+     
+     gtk_container_add(GTK_FRAME(vFrame), vGrid);
+     gtk_container_add(GTK_FRAME(coreFrame), coreGrid);
+
      pango_font_description_free(fontDesc);
 
      // Attach widgets to debug window grid
      gtk_grid_attach(GTK_GRID(debugGrid), buttonBox, 0, 0, 1, 1);
-     gtk_grid_attach(GTK_GRID(debugGrid), coreLabel, 0, 1, 1, 1);
-     gtk_grid_attach(GTK_GRID(debugGrid), labelGrid, 1, 0, 1, 1);
+     gtk_grid_attach(GTK_GRID(debugGrid), coreFrame, 1, 0, 1, 1);
+     gtk_grid_attach(GTK_GRID(debugGrid), vFrame,    0, 1, 1, 1);
      gtk_grid_attach(GTK_GRID(debugGrid), scroll,    1, 1, 1, 1);
 
      // Attach widgets to scrolled window grid
      gtk_grid_attach(GTK_GRID(scrollGrid), pcListBox, 0, 0, 1, 1);
      gtk_grid_attach(GTK_GRID(scrollGrid), codeView,  1, 0, 1, 1); 
-
-     // Attach labels to label grid
-     gtk_grid_attach(GTK_GRID(labelGrid), vLabel, 0, 0, 1, 1);
 
      // Write program disassembly to text view
      buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(codeView));
