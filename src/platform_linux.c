@@ -18,7 +18,12 @@ static int stepping = 0;
 static GtkWidget* mainWindow, *drawingArea;
 static GtkWidget* debugWindow;
 
-static GtkWidget* vLabels[VNUM];
+static GtkWidget* vLabels[VNUM], *coreLabels[6];
+
+static GtkWidget* codeView;
+static GtkTextMark* mark;
+static GtkTextBuffer* buffer;
+static GtkTextIter start;
 
 // Contents of V registers for debugger
 static char regStr[1024];
@@ -46,23 +51,33 @@ InterpreterLoop (gpointer data)
           char str[4];
 
           snprintf(str, sizeof(str), "%d", core.v[i]);
-          gtk_label_set_text(vLabels[i], str);
+          gtk_label_set_text(GTK_LABEL(vLabels[i]), str);
      }
 
-     // Clear reg string and reuse it for other registers
-     regStr[0] = '\0';
-
-     snprintf(regStr, sizeof(regStr), "DT: %d\n\nST: %d\n\nSP: %d\n\nPC: 0x%03x\n\nI: 0x%03x\n\nStack: 0x%03xd\n\n",
-              core.dt, core.st, core.sp, core.pc, core.i, core.stack[core.sp]);
-
+     snprintf(regStr, sizeof(regStr), "%d", core.dt);
+     gtk_label_set_text(GTK_LABEL(coreLabels[0]), regStr);
+     snprintf(regStr, sizeof(regStr), "%d", core.st);
+     gtk_label_set_text(GTK_LABEL(coreLabels[1]), regStr);
+     snprintf(regStr, sizeof(regStr), "%d", core.sp);
+     gtk_label_set_text(GTK_LABEL(coreLabels[2]), regStr);
+     snprintf(regStr, sizeof(regStr), "0x%03x", core.pc);
+     gtk_label_set_text(GTK_LABEL(coreLabels[3]), regStr);
+     snprintf(regStr, sizeof(regStr), "0x%03x", core.i);
+     gtk_label_set_text(GTK_LABEL(coreLabels[4]), regStr);
+     snprintf(regStr, sizeof(regStr), "0x%03x", core.stack[core.sp]);
+     gtk_label_set_text(GTK_LABEL(coreLabels[5]), regStr);
+     
      gtk_window_set_title(GTK_WINDOW(mainWindow), "C8");
 
      if (stepping) {
           interpreting = 0;
           stepping = 0;
 
-          // lineNum = table[core.pc];
-          // move to line in code
+          // The buffer is not modified past application initialization,
+          // so we should be able to just use a TextIter here?
+          gtk_text_buffer_get_start_iter(buffer, &start);
+          gtk_text_iter_set_line(&start, 50);//(core.pc - 0x200) / 2);
+          gtk_text_view_scroll_to_iter(codeView, &start, 0.0, FALSE, 0.5, 0.5);
      }
 
      return TRUE;
@@ -251,18 +266,16 @@ Activate (GtkApplication* app, gpointer userData)
      GtkWidget* displayFrame, *vFrame, *coreFrame;
      GdkColor black = { 0, 0, 0, 1 };
 
-     GtkWidget* scroll, *codeView, *pcListBox; 
+     GtkWidget* buttonBox, *pauseButton, *stepButton;
+     GtkWidget* scroll, *pcListBox; 
      GtkWidget* debugGrid, *vGrid, *coreGrid, *scrollGrid;
 
      GtkWidget* mainBox;
-
-     GtkWidget* buttonBox;
-     GtkWidget* pauseButton, *stepButton;
-
      GtkWidget* menuBar, *menuItem;
 
-
-     GtkTextBuffer* buffer;
+     //
+     // Build and activate main interpreter window.
+     //
 
      mainWindow = gtk_application_window_new(app);
      gtk_window_set_title(GTK_WINDOW(mainWindow), "C8");
@@ -286,20 +299,23 @@ Activate (GtkApplication* app, gpointer userData)
      gtk_widget_set_size_request(GTK_WIDGET(drawingArea), SCREEN_WIDTH, SCREEN_HEIGHT);
      // TODO: Use non-deprecated function (adjust bg color in draw signal?)
      gtk_widget_modify_bg(GTK_WIDGET(drawingArea), GTK_STATE_NORMAL, &black);
-     g_signal_connect (G_OBJECT(drawingArea), "draw",
-                       G_CALLBACK(Draw), NULL);
      gtk_container_add(GTK_CONTAINER(displayFrame), drawingArea);
 
-     gtk_box_pack_start(GTK_BOX(mainBox), menuBar, TRUE, TRUE, 0);
+     //gtk_box_pack_start(GTK_BOX(mainBox), menuBar, TRUE, TRUE, 0);
      gtk_box_pack_end(GTK_BOX(mainBox), displayFrame, TRUE, TRUE, 0);
 
      gtk_container_add(GTK_CONTAINER(mainWindow), mainBox);
 
      gtk_widget_show_all(mainWindow);
 
+     //
+     // Build and activate debugger window.
+     //
+
      debugWindow = gtk_application_window_new(app);
      gtk_widget_set_size_request(GTK_WIDGET(debugWindow), 600, 400);
      gtk_window_set_title(GTK_WINDOW(debugWindow), "Debugger");
+     gtk_window_set_resizable(GTK_WINDOW(debugWindow), FALSE);
 
      // Create window and label grids
      debugGrid  = gtk_grid_new();
@@ -307,7 +323,7 @@ Activate (GtkApplication* app, gpointer userData)
      coreGrid   = gtk_grid_new();
      scrollGrid = gtk_grid_new();
 
-     vFrame = gtk_frame_new(NULL);
+     vFrame    = gtk_frame_new(NULL);
      coreFrame = gtk_frame_new(NULL);
 
      gtk_container_add(GTK_CONTAINER(debugWindow), debugGrid);
@@ -324,6 +340,7 @@ Activate (GtkApplication* app, gpointer userData)
      scroll = gtk_scrolled_window_new(NULL, NULL);
      gtk_widget_set_hexpand(scroll, TRUE);
      gtk_widget_set_vexpand(scroll, TRUE);
+     gtk_container_add(GTK_CONTAINER(scroll), scrollGrid);
 
      PangoFontDescription* fontDesc;
      fontDesc = pango_font_description_from_string("Monospace 12");
@@ -331,15 +348,17 @@ Activate (GtkApplication* app, gpointer userData)
      // Create code textview
      codeView = gtk_text_view_new();
      gtk_widget_set_hexpand(codeView, TRUE);
-     gtk_text_view_set_editable(GTK_TEXT_VIEW(codeView), FALSE);
      gtk_widget_modify_font(codeView, fontDesc);
-     
-     gtk_container_add(GTK_CONTAINER(scroll), scrollGrid);
+     gtk_text_view_set_editable(GTK_TEXT_VIEW(codeView), FALSE);
+
+     // Adjust font size for program counter labels.
+     fontDesc = pango_font_description_from_string("Monospace 10");
+
+     mark = gtk_text_mark_new(NULL, FALSE);
 
      pcListBox = gtk_list_box_new();
 
-     fontDesc = pango_font_description_from_string("Monospace 10");
-
+     // Make program counter labels and insert them into listbox.
      for (int i = PROGRAM_LOC_OFFSET; i < PROGRAM_LOC_OFFSET+programSize; i += 2) {
           char str[12]; 
 
@@ -350,43 +369,53 @@ Activate (GtkApplication* app, gpointer userData)
           gtk_list_box_insert(GTK_LIST_BOX(pcListBox), label, -1);
      }
 
+     // Make V register labels
      for (int i = 0; i < VNUM; i++) {
           char v[4];
 
           snprintf(v, sizeof(v), "V%d", i);
           GtkWidget* label = gtk_label_new(v);
+          gtk_label_set_width_chars(GTK_LABEL(label), 10);
 
           gtk_grid_attach(GTK_GRID(vGrid), label, 0, i, 1, 1);
      }
 
+     // Make V register value labels
      for (int i = 0; i < VNUM; i++) {
-          vLabels[i] = gtk_label_new(NULL);
-          gtk_label_set_width_chars(vLabels[i], 10);
+          vLabels[i] = gtk_label_new("0");
+          gtk_label_set_width_chars(GTK_LABEL(vLabels[i]), 10);
 
           gtk_grid_attach(GTK_GRID(vGrid), vLabels[i], 1, i, 1, 1);
      }
 
      // This is ugly.
      GtkWidget* label = gtk_label_new("DT");
-     gtk_label_set_width_chars(label, 10);
+     gtk_label_set_width_chars(GTK_LABEL(label), 10);
      gtk_grid_attach(GTK_GRID(coreGrid), label, 0, 0, 1, 1);
      label = gtk_label_new("ST");
+     gtk_label_set_width_chars(GTK_LABEL(label), 10);
      gtk_grid_attach(GTK_GRID(coreGrid), label, 1, 0, 1, 1);
-     gtk_label_set_width_chars(label, 10);
      label = gtk_label_new("SP");
+     gtk_label_set_width_chars(GTK_LABEL(label), 10);
      gtk_grid_attach(GTK_GRID(coreGrid), label, 2, 0, 1, 1);
-     gtk_label_set_width_chars(label, 10);
      label = gtk_label_new("PC");
+     gtk_label_set_width_chars(GTK_LABEL(label), 10);
      gtk_grid_attach(GTK_GRID(coreGrid), label, 3, 0, 1, 1);
-     gtk_label_set_width_chars(label, 10);
      label = gtk_label_new("I");
+     gtk_label_set_width_chars(GTK_LABEL(label), 10);
      gtk_grid_attach(GTK_GRID(coreGrid), label, 4, 0, 1, 1);
-     gtk_label_set_width_chars(label, 10);
      label = gtk_label_new("Stack");
+     gtk_label_set_width_chars(GTK_LABEL(label), 10);
      gtk_grid_attach(GTK_GRID(coreGrid), label, 5, 0, 1, 1);
+
+     for (int i = 0; i < 6; i++) {
+          coreLabels[i] = gtk_label_new("0");
+
+          gtk_grid_attach(GTK_GRID(coreGrid), coreLabels[i], i, 1, 1, 1);
+     }
      
-     gtk_container_add(GTK_FRAME(vFrame), vGrid);
-     gtk_container_add(GTK_FRAME(coreFrame), coreGrid);
+     gtk_container_add(GTK_CONTAINER(vFrame), vGrid);
+     gtk_container_add(GTK_CONTAINER(coreFrame), coreGrid);
 
      pango_font_description_free(fontDesc);
 
@@ -406,9 +435,14 @@ Activate (GtkApplication* app, gpointer userData)
 
      gtk_widget_show_all(debugWindow);
 
+     //
+     // Signals and timers
+     //
+
      g_signal_connect(G_OBJECT(mainWindow), "destroy", G_CALLBACK(DestroyApplication), NULL);
      g_signal_connect(G_OBJECT(mainWindow), "key-press-event", G_CALLBACK(KeyPress), NULL);
      g_signal_connect(G_OBJECT(mainWindow), "key-release-event", G_CALLBACK(KeyRelease), NULL);
+     g_signal_connect(G_OBJECT(drawingArea), "draw", G_CALLBACK(Draw), NULL);
 
      g_signal_connect(G_OBJECT(pauseButton), "clicked", G_CALLBACK(PauseClicked), NULL);
      g_signal_connect(G_OBJECT(stepButton), "clicked", G_CALLBACK(StepClicked), NULL);
@@ -429,7 +463,7 @@ main (int argc, char* argv[])
 
      CHIP8_StartExecution();
 
-     CHIP8_BuildInstructionTable(disassemblyText);  
+     CHIP8_BuildInstructionBuffer(disassemblyText);  
 
      // TODO: Create a proper application ID 
      app = gtk_application_new("com.test.c8", G_APPLICATION_FLAGS_NONE);

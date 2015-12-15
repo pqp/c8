@@ -39,6 +39,8 @@ static unsigned char* program;
 
 static unsigned numOfInst = 0;
 
+static unsigned last = 0;
+
 static int
 LoadProgram (const char* filename)
 {
@@ -108,6 +110,9 @@ AppendToBuffer (char* buffer, const char* str, ...)
 
      // TODO: Verify that vsnprintf works here
 
+     if (!last)
+          strncat(final, "\n", 1);
+
      strncat(buffer, final, strlen(final));
 
      // TODO: Verify that strncat does not exceed bounds of buffer
@@ -153,142 +158,146 @@ CHIP8_LoadProgramIntoRAM (unsigned char* program, const unsigned programSize)
 }
 
 void
-CHIP8_BuildInstructionTable (char* buffer)
+CHIP8_BuildInstructionBuffer (char* buffer)
 {
-     // If I pass the program counter to the table,
-     // it should return the line index to me,
-     // and highlight that line in the debugger.
      for (int i = PROGRAM_LOC_OFFSET; i < PROGRAM_LOC_OFFSET+programSize; i += 2) {
           uint16_t opcode = 0;
           opcode |= core.mem[i];
           opcode <<= 8;
           opcode |= core.mem[i + 1];
 
+          // If there isn't another instruction,
+          // don't add a newline char to this line in the buffer.
+          if (i + 2 >= (PROGRAM_LOC_OFFSET+programSize))
+               last = 1;
+          else
+               last = 0;
+
           const unsigned x       = (opcode & 0x0F00) >> 8;
           const unsigned y       = (opcode & 0x00F0) >> 4;
           const unsigned data    = (opcode & 0x00FF);
           const unsigned address = (opcode & 0x0FFF);
 
-          //table[core.pc] = line;
           switch (opcode)
           {
           case 0x00E0:
-               AppendToBuffer(buffer, "CLS\n");
+               AppendToBuffer(buffer, "CLS");
                break;
                
           case 0x00EE:
-               AppendToBuffer(buffer, "RET\n");
+               AppendToBuffer(buffer, "RET");
                break;
           }
 
           switch (opcode & 0xF000)
           {
           default:
-               AppendToBuffer(buffer, "UNKNOWN OPCODE\n");
+               AppendToBuffer(buffer, "UNKNOWN OPCODE");
                break;
           case 0x1000:
-               AppendToBuffer(buffer, "JP 0x%03x\n", address);
+               AppendToBuffer(buffer, "JP 0x%03x", address);
                break;
           case 0x2000:
-               AppendToBuffer(buffer, "CALL 0x%03x\n", address);
+               AppendToBuffer(buffer, "CALL 0x%03x", address);
                break;
           case 0x3000:
-               AppendToBuffer(buffer, "SE V%d, 0x%03x (%d)\n", x, data, data);
+               AppendToBuffer(buffer, "SE V%d, 0x%03x (%d)", x, data, data);
                break;
           case 0x4000:
-               AppendToBuffer(buffer, "SNE V%d, 0x%03x (%d)\n", x, data, data);
+               AppendToBuffer(buffer, "SNE V%d, 0x%03x (%d)", x, data, data);
                break;
           case 0x5000:
-               AppendToBuffer(buffer, "SE V%d, V%d\n", x, y);
+               AppendToBuffer(buffer, "SE V%d, V%d", x, y);
                break;
           case 0x6000:
-               AppendToBuffer(buffer, "LD V%d, 0x%03x (%d)\n", x, data, data);
+               AppendToBuffer(buffer, "LD V%d, 0x%03x (%d)", x, data, data);
                break;
           case 0x7000:
-               AppendToBuffer(buffer, "ADD V%d, 0x%03x (%d)\n", x, data, data);
+               AppendToBuffer(buffer, "ADD V%d, 0x%03x (%d)", x, data, data);
                break;
           case 0x8000:
                switch (opcode & 0x000F)
                {
                case 0x0:
-                    AppendToBuffer(buffer, "LD V%d, V%d\n", x, y);
+                    AppendToBuffer(buffer, "LD V%d, V%d", x, y);
                     break;
                case 0x1:
-                    AppendToBuffer(buffer, "OR V%d, V%d\n", x, y);
+                    AppendToBuffer(buffer, "OR V%d, V%d", x, y);
                     break;
                case 0x2:
-                    AppendToBuffer(buffer, "AND V%d, V%d\n", x, y);
+                    AppendToBuffer(buffer, "AND V%d, V%d", x, y);
                     break;
                case 0x3:
-                    AppendToBuffer(buffer, "XOR V%d, V%d\n", x, y);
+                    AppendToBuffer(buffer, "XOR V%d, V%d", x, y);
                     break;
                case 0x4:
-                    AppendToBuffer(buffer, "ADD V%d, V%d\n", x, y);
+                    AppendToBuffer(buffer, "ADD V%d, V%d", x, y);
                     break;
                case 0x5:
-                    AppendToBuffer(buffer, "SUB V%d, V%d\n", x, y);
+                    AppendToBuffer(buffer, "SUB V%d, V%d", x, y);
                     break;
                case 0x6:
-                    AppendToBuffer(buffer, "0x8xy6: NOT IMPLEMENTED\n");
+                    AppendToBuffer(buffer, "0x8xy6: NOT IMPLEMENTED");
                     break;
                case 0x7:
-                    AppendToBuffer(buffer, "SUBN V%d, V%d\n", x, y);
+                    AppendToBuffer(buffer, "SUBN V%d, V%d", x, y);
                     break;
                case 0xE:
-                    AppendToBuffer(buffer, "0x8xyE: NOT DOCUMENTED\n");
+                    AppendToBuffer(buffer, "0x8xyE: NOT DOCUMENTED");
                     break;
                default:
+                    AppendToBuffer(buffer, "0x8xy?: NOT DOCUMENTED");
                     break;
                }
                break;
           case 0x9000:
-               AppendToBuffer(buffer, "SNE V%d, V%d\n", x, y);
+               AppendToBuffer(buffer, "SNE V%d, V%d", x, y);
                break;
           case 0xA000:
-               AppendToBuffer(buffer, "LD I, 0x%03x\n", core.i, address);
+               AppendToBuffer(buffer, "LD I, 0x%03x", core.i, address);
                break;
           case 0xB000:
-               AppendToBuffer(buffer, "JP V0, 0x%03x\n", address);
+               AppendToBuffer(buffer, "JP V0, 0x%03x", address);
                break;
           case 0xC000:
-               AppendToBuffer(buffer, "RND V%d, 0x%03x (%d)\n", x, data, data);
+               AppendToBuffer(buffer, "RND V%d, 0x%03x (%d)", x, data, data);
                break;
           case 0xD000:
-               AppendToBuffer(buffer, "DRW V%d, V%d, %d\n", x, y, opcode & 0x000F);
+               AppendToBuffer(buffer, "DRW V%d, V%d, %d", x, y, opcode & 0x000F);
                break;
           case 0xE000:
                switch (data)
                {
                case 0x9E:
-                    AppendToBuffer(buffer, "SKP V%d\n", x);
+                    AppendToBuffer(buffer, "SKP V%d", x);
                     break;
                case 0xA1:
-                    AppendToBuffer(buffer, "SKNP V%d\n", x);
+                    AppendToBuffer(buffer, "SKNP V%d", x);
                     break;
                }
           case 0xF000:
                switch (data)
                {
                case 0x07:
-                    AppendToBuffer(buffer, "LD V%d, DT\n", x);
+                    AppendToBuffer(buffer, "LD V%d, DT", x);
                     break;
                case 0x0A:
-                    AppendToBuffer(buffer, "LD V%d, key\n", x);
+                    AppendToBuffer(buffer, "LD V%d, key", x);
                     break;
                case 0x15:
-                    AppendToBuffer(buffer, "LD DT, V%d\n", x);
+                    AppendToBuffer(buffer, "LD DT, V%d", x);
                     break;
                case 0x18:
-                    AppendToBuffer(buffer, "LD ST, V%x\n", x);
+                    AppendToBuffer(buffer, "LD ST, V%x", x);
                     break;
                case 0x1E:
-                    AppendToBuffer(buffer, "ADD I, V%d\n", x);
+                    AppendToBuffer(buffer, "ADD I, V%d", x);
                     break;
                case 0x29:
-                    AppendToBuffer(buffer, "LD F, V%d\n", x);
+                    AppendToBuffer(buffer, "LD F, V%d", x);
                     break;
                case 0x33:
-                    AppendToBuffer(buffer, "LD B, V%d\n", x);
+                    AppendToBuffer(buffer, "LD B, V%d", x);
                     break;
                }
           }
