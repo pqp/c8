@@ -36,9 +36,7 @@ struct platform_interface_t pi;
 unsigned programSize;
 
 static unsigned char* program;
-
 static unsigned numOfInst = 0;
-
 static unsigned last = 0;
 
 static int
@@ -155,6 +153,16 @@ CHIP8_LoadProgramIntoRAM (unsigned char* program, const unsigned programSize)
      }
 
      free(program);
+}
+
+static void
+ClearDisplay (void)
+{
+     for (int y = 0; y < SCREEN_HEIGHT; y++) {
+          for (int x = 0; x < SCREEN_WIDTH; x++) {
+               core.vidmem[y][x] = 0;
+          }
+     }
 }
 
 void
@@ -310,6 +318,27 @@ CHIP8_BuildInstructionBuffer (char* buffer)
 }
 
 void
+CHIP8_Reset (void)
+{
+     ClearDisplay();
+
+     for (int i = 0; i < VNUM; i++) {
+          core.v[i] = 0;
+     }
+
+     core.dt = core.st = core.sp = core.pc = core.i = 0;
+
+     // Just use VNUM for stack
+     // (same number of values in array)
+     for (int i = 0; i < VNUM; i++) {
+          core.stack[i] = 0;
+     }
+
+     // Move program counter to beginning of program again.
+     core.pc = PROGRAM_LOC_OFFSET;
+}
+
+void
 CHIP8_StartExecution (void)
 {
      CHIP8_LoadProgramIntoRAM(program, programSize);
@@ -348,12 +377,7 @@ CHIP8_FetchAndDecodeOpcode (void)
 
           printd("0x00E0: Clear the display.\n");
 
-          for (int y = 0; y < SCREEN_HEIGHT; y++) {
-               for (int x = 0; x < SCREEN_WIDTH; x++) {
-                    core.vidmem[y][x] = 0;
-               }
-          }
-
+          ClearDisplay();
           break;
                
      case 0x00EE:

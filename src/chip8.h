@@ -40,6 +40,7 @@ struct chip8_core {
 int  CHIP8_Main (int argc, char* argv[]);
 void CHIP8_LoadProgramIntoRAM (unsigned char* program, const unsigned programSize);
 void CHIP8_BuildInstructionBuffer (char* buffer);
+void CHIP8_Reset (void);
 void CHIP8_StartExecution (void);
 int  CHIP8_FetchAndDecodeOpcode (void);
 
