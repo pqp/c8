@@ -37,8 +37,8 @@ struct chip8_core {
      uint16_t stack[16];
 };
 
-int  CHIP8_Main (int argc, char* argv[]);
-void CHIP8_LoadProgramIntoRAM (unsigned char* program, const unsigned programSize);
+int  CHIP8_Main (const char* filename);
+int  CHIP8_LoadProgram (const char* filename);
 void CHIP8_BuildInstructionBuffer (char* buffer);
 void CHIP8_Reset (void);
 void CHIP8_StartExecution (void);

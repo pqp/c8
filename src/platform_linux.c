@@ -5,6 +5,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 #define WINDOW_WIDTH_OFFSET   30
 #define WINDOW_HEIGHT_OFFSET  20
@@ -12,8 +13,8 @@
 
 #define DRAWING_AREA_SCALE    4
 
-static int interpreting = 0;
-static int stepping = 0;
+static bool interpreting = false;
+static bool stepping = false;
 
 // TODO: Make this non-static?
 static GtkWidget* mainWindow, *drawingArea;
@@ -82,8 +83,8 @@ InterpreterLoop (gpointer data)
      gtk_window_set_title(GTK_WINDOW(mainWindow), "C8");
 
      if (stepping) {
-          interpreting = 0;
-          stepping = 0;
+          interpreting = false;
+          stepping = false;
 
           /*
           // The buffer is not modified past application initialization,
@@ -131,6 +132,42 @@ static void
 DestroyApplication (GtkApplication* app, gpointer userData)
 {
      exit(1);
+}
+
+static void
+FileDialog (void)
+{
+     GtkWidget* dialog;
+     GtkFileChooserAction action = GTK_FILE_CHOOSER_ACTION_OPEN;
+
+     // Stop interpreter while loading a new program
+     interpreting = false;
+
+     dialog = gtk_file_chooser_dialog_new("Open File",
+                                          GTK_WINDOW(mainWindow),
+                                          action,
+                                          "Cancel",
+                                          GTK_RESPONSE_CANCEL,
+                                          "Open",
+                                          GTK_RESPONSE_ACCEPT,
+                                          NULL);
+
+     gint result = gtk_dialog_run(GTK_DIALOG(dialog));
+     if (result == GTK_RESPONSE_ACCEPT) {
+          GtkFileChooser* chooser = GTK_FILE_CHOOSER(dialog);
+          char* filename;
+
+          filename = gtk_file_chooser_get_filename(chooser);
+               
+          if (CHIP8_Main(filename) < 0)
+               ;
+
+          CHIP8_Reset();
+     }
+
+     interpreting = true;
+
+     gtk_widget_destroy(dialog);
 }
 
 // I think this sucks.
@@ -282,14 +319,15 @@ ResetClicked (void)
 static void
 StepClicked (void)
 {
-     interpreting = 1;
-     stepping = 1;
+     interpreting = false;
+     stepping = false;
 }
 
 static GtkWidget*
 BuildMainWindow (GtkApplication* app)
 {
      GtkWidget* mainWindow, *displayFrame, *mainBox;
+     GtkWidget* menuBar, *fileMenu, *file, *fileLoad, *fileQuit;
      GdkColor black = { 0, 0, 0, 1 };
      
      mainWindow = gtk_application_window_new(app);
@@ -303,12 +341,18 @@ BuildMainWindow (GtkApplication* app)
      displayFrame = gtk_frame_new(NULL);
      gtk_frame_set_shadow_type(GTK_FRAME(displayFrame), GTK_SHADOW_IN);
 
-     /*menuBar = gtk_menu_bar_new();
-     gtk_widget_set_hexpand(menuBar, TRUE);
+     menuBar = gtk_menu_bar_new();
      gtk_widget_show(menuBar);
 
-     menuItem = gtk_menu_item_new_with_label("Test");
-     gtk_menu_shell_append(GTK_MENU_SHELL(menuBar), menuItem);*/
+     fileMenu = gtk_menu_new();
+     file = gtk_menu_item_new_with_label("File");
+     fileLoad = gtk_menu_item_new_with_label("Load");
+     fileQuit = gtk_menu_item_new_with_label("Quit");
+
+     gtk_menu_item_set_submenu(GTK_MENU_ITEM(file), fileMenu);
+     gtk_menu_shell_append(GTK_MENU_SHELL(fileMenu), fileLoad);
+     gtk_menu_shell_append(GTK_MENU_SHELL(fileMenu), fileQuit);
+     gtk_menu_shell_append(GTK_MENU_SHELL(menuBar), file);
 
      drawingArea = gtk_drawing_area_new();
      gtk_widget_set_size_request(GTK_WIDGET(drawingArea), SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -316,10 +360,13 @@ BuildMainWindow (GtkApplication* app)
      gtk_widget_modify_bg(GTK_WIDGET(drawingArea), GTK_STATE_NORMAL, &black);
      gtk_container_add(GTK_CONTAINER(displayFrame), drawingArea);
 
-     //gtk_box_pack_start(GTK_BOX(mainBox), menuBar, TRUE, TRUE, 0);
+     gtk_box_pack_start(GTK_BOX(mainBox), menuBar, FALSE, FALSE, 0);
      gtk_box_pack_end(GTK_BOX(mainBox), displayFrame, TRUE, TRUE, 0);
 
      gtk_container_add(GTK_CONTAINER(mainWindow), mainBox);
+
+     g_signal_connect(G_OBJECT(fileLoad), "activate", G_CALLBACK(FileDialog), NULL);
+     g_signal_connect(G_OBJECT(fileQuit), "activate", G_CALLBACK(DestroyApplication), NULL);
 
      g_signal_connect(G_OBJECT(mainWindow), "destroy", G_CALLBACK(DestroyApplication), NULL);
      g_signal_connect(G_OBJECT(mainWindow), "key-press-event", G_CALLBACK(KeyPress), NULL);
@@ -476,8 +523,6 @@ BuildDebugWindow (GtkApplication* app)
 static void
 Activate (GtkApplication* app, gpointer userData)
 {
-     GtkWidget* menuBar, *menuItem;
-
      //
      // Build and activate main interpreter window.
      //
@@ -490,13 +535,11 @@ Activate (GtkApplication* app, gpointer userData)
      //
 
      GtkWidget* debugWindow = BuildDebugWindow(app);
+     gtk_widget_show_all(debugWindow);
 
      // Write program disassembly to text view
      buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(codeView));
      gtk_text_buffer_set_text(buffer, disassemblyText, sizeof(char) * strlen(disassemblyText));
-
-     gtk_widget_show_all(debugWindow);
-
 
      g_timeout_add(1,  InterpreterLoop, NULL);
      g_timeout_add(17, Redraw, NULL);
@@ -508,7 +551,7 @@ main (int argc, char* argv[])
      GtkApplication* app;
      int status;
      
-     if (!CHIP8_Main(argc, argv)) {
+     if (!CHIP8_Main(argv[1])) {
           return 0;
      }
 

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <time.h>
 #include <string.h>
 
@@ -37,12 +38,17 @@ unsigned programSize;
 
 static unsigned char* program;
 static unsigned numOfInst = 0;
-static unsigned last = 0;
+static bool last = false;
 
-static int
+int
 LoadProgram (const char* filename)
 {
      FILE* programFile;
+
+     if (!filename) {
+          printf("Filename is invalid, halting.\n");
+          exit(1);
+     }
 
      printf("Opening %s...\n", filename);
 
@@ -116,28 +122,11 @@ AppendToBuffer (char* buffer, const char* str, ...)
      // TODO: Verify that strncat does not exceed bounds of buffer
 }
 
-int
-CHIP8_Main (int argc, char* argv[])
-{
-     if (!argv[1]) {
-          printf("%s is not a proper filename.\n", argv[1]);
-          return 0;
-     }
-
-     int result = LoadProgram(argv[1]);
-
-     if (!result) {
-          return 0;
-     }
-
-     return 1;
-}
-
 /* CHIP8_LoadProgramIntoRAM
    Load hex digit bitmaps and program into CHIP-8 system memory.
 */
-void
-CHIP8_LoadProgramIntoRAM (unsigned char* program, const unsigned programSize)
+static void
+LoadProgramIntoRAM (unsigned char* program, const unsigned programSize)
 {
      void* digitDest = memcpy(core.mem, digits, sizeof(digits));
 
@@ -153,6 +142,25 @@ CHIP8_LoadProgramIntoRAM (unsigned char* program, const unsigned programSize)
      }
 
      free(program);
+}
+
+int
+CHIP8_Main (const char* filename)
+{
+     if (!filename) {
+          printf("%s is not a proper filename.\n", filename);
+          return 0;
+     }
+
+     int result = LoadProgram(filename);
+
+     if (!result) {
+          return 0;
+     }
+
+     LoadProgramIntoRAM(program, programSize);
+
+     return 1;
 }
 
 static void
@@ -177,9 +185,9 @@ CHIP8_BuildInstructionBuffer (char* buffer)
           // If there isn't another instruction,
           // don't add a newline char to this line in the buffer.
           if (i + 2 >= (PROGRAM_LOC_OFFSET+programSize))
-               last = 1;
+               last = true;
           else
-               last = 0;
+               last = false;
 
           const unsigned x       = (opcode & 0x0F00) >> 8;
           const unsigned y       = (opcode & 0x00F0) >> 4;
@@ -341,8 +349,6 @@ CHIP8_Reset (void)
 void
 CHIP8_StartExecution (void)
 {
-     CHIP8_LoadProgramIntoRAM(program, programSize);
-
      core.pc = PROGRAM_LOC_OFFSET;
 
      srand(time(NULL)); // I know rand() sucks and all, but...
