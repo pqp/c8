@@ -173,9 +173,18 @@ ClearDisplay (void)
      }
 }
 
-void
-CHIP8_BuildInstructionBuffer (char* buffer)
+char*
+CHIP8_BuildInstructionBuffer (unsigned long length)
 {
+     char* buffer = malloc(length);
+
+     if (!buffer) {
+          printf("Couldn't allocate memory for instruction buffer.\n");
+          exit(1);
+     }
+
+     buffer[0] = '\0';
+     
      for (int i = PROGRAM_LOC_OFFSET; i < PROGRAM_LOC_OFFSET+programSize; i += 2) {
           uint16_t opcode = 0;
           opcode |= core.mem[i];
@@ -323,6 +332,8 @@ CHIP8_BuildInstructionBuffer (char* buffer)
      // after we build the table
 
      printf("Disassembled %d instructions (out of %d total instructions).\n", numOfInst, programSize / 2);
+
+     return buffer;
 }
 
 void

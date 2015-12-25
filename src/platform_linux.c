@@ -17,6 +17,7 @@ static bool interpreting = false;
 static bool stepping = false;
 
 // TODO: Make this non-static?
+static GtkWidget* debugWindow;
 static GtkWidget* mainWindow, *drawingArea;
 
 static GtkWidget* vLabels[VNUM], *coreLabels[6];
@@ -29,9 +30,11 @@ static GtkTextIter start;
 // Contents of V registers for debugger
 static char regStr[1024];
 
+static int bufferLen = 2048;
+
 // Disassembly of program code
 // TODO: Need dynamically sized array here
-static char disassemblyText[2048];
+static char* disassemblyText;
 
 static void
 UpdateLabels (void)
@@ -108,7 +111,6 @@ UpdateDisplay (GtkWidget* widget, cairo_t* cr, gpointer data)
      guint width, height;
      GdkRGBA white = { 255, 255, 255, 255 };
 
-     // This is sloppy!
      cairo_scale(cr, DRAWING_AREA_SCALE, DRAWING_AREA_SCALE);
 
      width = gtk_widget_get_allocated_width(widget);
@@ -323,16 +325,31 @@ StepClicked (void)
      stepping = false;
 }
 
+static void
+ToggleDebugger (void)
+{
+     gboolean visible = gtk_widget_get_visible(debugWindow);
+     
+     if (visible) {
+          gtk_widget_hide(debugWindow);
+     } else {
+          gtk_widget_show_all(debugWindow);
+     }
+}
+
 static GtkWidget*
 BuildMainWindow (GtkApplication* app)
 {
      GtkWidget* mainWindow, *displayFrame, *mainBox;
-     GtkWidget* menuBar, *fileMenu, *file, *fileLoad, *fileQuit;
+
+     GtkWidget* menuBar;
+     GtkWidget* fileMenu, *file, *fileLoad, *fileReset, *fileQuit;
+     GtkWidget* viewMenu, *view, *viewDebugger;
+     
      GdkColor black = { 0, 0, 0, 1 };
      
      mainWindow = gtk_application_window_new(app);
      gtk_window_set_title(GTK_WINDOW(mainWindow), "C8");
-     gtk_widget_set_size_request(GTK_WIDGET(mainWindow), (SCREEN_WIDTH*DRAWING_AREA_SCALE)+WINDOW_WIDTH_OFFSET, (SCREEN_HEIGHT*DRAWING_AREA_SCALE)+WINDOW_HEIGHT_OFFSET);
      gtk_window_set_resizable(GTK_WINDOW(mainWindow), FALSE);
      gtk_container_set_border_width(GTK_CONTAINER(mainWindow), WINDOW_BORDER_WIDTH);
 
@@ -347,15 +364,28 @@ BuildMainWindow (GtkApplication* app)
      fileMenu = gtk_menu_new();
      file = gtk_menu_item_new_with_label("File");
      fileLoad = gtk_menu_item_new_with_label("Load");
+     fileReset = gtk_menu_item_new_with_label("Reset");
      fileQuit = gtk_menu_item_new_with_label("Quit");
 
      gtk_menu_item_set_submenu(GTK_MENU_ITEM(file), fileMenu);
      gtk_menu_shell_append(GTK_MENU_SHELL(fileMenu), fileLoad);
+     gtk_menu_shell_append(GTK_MENU_SHELL(fileMenu), fileReset);
      gtk_menu_shell_append(GTK_MENU_SHELL(fileMenu), fileQuit);
      gtk_menu_shell_append(GTK_MENU_SHELL(menuBar), file);
 
+     viewMenu = gtk_menu_new();
+     view = gtk_menu_item_new_with_label("View");
+     viewDebugger = gtk_check_menu_item_new_with_label("Debugger");
+     gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(viewDebugger), TRUE);
+
+     gtk_menu_item_set_submenu(GTK_MENU_ITEM(view), viewMenu);
+     gtk_menu_shell_append(GTK_MENU_SHELL(viewMenu), viewDebugger);
+     gtk_menu_shell_append(GTK_MENU_SHELL(menuBar), view);
+
      drawingArea = gtk_drawing_area_new();
-     gtk_widget_set_size_request(GTK_WIDGET(drawingArea), SCREEN_WIDTH, SCREEN_HEIGHT);
+     gtk_widget_set_size_request(GTK_WIDGET(drawingArea), SCREEN_WIDTH*4, SCREEN_HEIGHT*4);
+     gtk_widget_set_hexpand(GTK_WIDGET(drawingArea), TRUE);
+     gtk_widget_set_vexpand(GTK_WIDGET(drawingArea), TRUE);
      // TODO: Use non-deprecated function (adjust bg color in draw signal?)
      gtk_widget_modify_bg(GTK_WIDGET(drawingArea), GTK_STATE_NORMAL, &black);
      gtk_container_add(GTK_CONTAINER(displayFrame), drawingArea);
@@ -366,22 +396,22 @@ BuildMainWindow (GtkApplication* app)
      gtk_container_add(GTK_CONTAINER(mainWindow), mainBox);
 
      g_signal_connect(G_OBJECT(fileLoad), "activate", G_CALLBACK(FileDialog), NULL);
+     g_signal_connect(G_OBJECT(fileReset), "activate", G_CALLBACK(ResetClicked), NULL);
      g_signal_connect(G_OBJECT(fileQuit), "activate", G_CALLBACK(DestroyApplication), NULL);
+
+     g_signal_connect(G_OBJECT(viewDebugger), "activate", G_CALLBACK(ToggleDebugger), NULL);
 
      g_signal_connect(G_OBJECT(mainWindow), "destroy", G_CALLBACK(DestroyApplication), NULL);
      g_signal_connect(G_OBJECT(mainWindow), "key-press-event", G_CALLBACK(KeyPress), NULL);
      g_signal_connect(G_OBJECT(mainWindow), "key-release-event", G_CALLBACK(KeyRelease), NULL);
      g_signal_connect(G_OBJECT(drawingArea), "draw", G_CALLBACK(UpdateDisplay), NULL);
 
-     // FIXME
-     // Kind of pointless to return this since it's in global scope
      return mainWindow;
 }
 
 static GtkWidget*
 BuildDebugWindow (GtkApplication* app)
 {
-     GtkWidget* debugWindow;
      GtkWidget* vFrame, *coreFrame;
 
      GtkWidget* buttonBox, *pauseButton, *resetButton, *stepButton;
@@ -513,6 +543,7 @@ BuildDebugWindow (GtkApplication* app)
 
      gtk_container_add(GTK_CONTAINER(debugWindow), debugGrid);
 
+     g_signal_connect(G_OBJECT(debugWindow), "delete-event", G_CALLBACK (gtk_widget_hide_on_delete), NULL);
      g_signal_connect(G_OBJECT(pauseButton), "clicked", G_CALLBACK(PauseClicked), NULL);
      g_signal_connect(G_OBJECT(resetButton), "clicked", G_CALLBACK(ResetClicked), NULL);
      g_signal_connect(G_OBJECT(stepButton), "clicked", G_CALLBACK(StepClicked), NULL);
@@ -534,12 +565,12 @@ Activate (GtkApplication* app, gpointer userData)
      // Build and activate debugger window.
      //
 
-     GtkWidget* debugWindow = BuildDebugWindow(app);
+     debugWindow = BuildDebugWindow(app);
      gtk_widget_show_all(debugWindow);
 
      // Write program disassembly to text view
      buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(codeView));
-     gtk_text_buffer_set_text(buffer, disassemblyText, sizeof(char) * strlen(disassemblyText));
+     gtk_text_buffer_set_text(buffer, disassemblyText, strlen(disassemblyText));
 
      g_timeout_add(1,  InterpreterLoop, NULL);
      g_timeout_add(17, Redraw, NULL);
@@ -557,7 +588,7 @@ main (int argc, char* argv[])
 
      CHIP8_StartExecution();
 
-     CHIP8_BuildInstructionBuffer(disassemblyText);  
+     disassemblyText = CHIP8_BuildInstructionBuffer(bufferLen);
 
      // TODO: Create a proper application ID 
      app = gtk_application_new("com.test.c8", G_APPLICATION_FLAGS_NONE);
