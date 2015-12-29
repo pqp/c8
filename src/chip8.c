@@ -3,9 +3,11 @@
 #include <stdbool.h>
 #include <time.h>
 #include <string.h>
-
-#ifdef DEBUG
 #include <stdarg.h>
+
+// On Windows, disable fopen warning
+#if (_MSC_VER)
+#pragma warning(disable:4996)
 #endif
 
 #include "chip8.h"
@@ -52,7 +54,7 @@ LoadProgram (const char* filename)
 
      printf("Opening %s...\n", filename);
 
-     programFile = fopen(filename, "r");
+     programFile = fopen(filename, "rb");
 
      if (!programFile) {
           printf("Couldn't open %s.\n", filename);
@@ -65,7 +67,7 @@ LoadProgram (const char* filename)
 
      // Should there be a program size limit?
 
-     program = malloc(sizeof(char) * fileSize);
+     program = malloc(fileSize);
      if (!program) {
           printf("Failed to allocate memory for program storage.\n");
           return 0;
@@ -79,6 +81,7 @@ LoadProgram (const char* filename)
      }
 
      printf("Loaded %s (%ld bytes)..\n", filename, fileSize);
+     fclose(programFile);
 
      programSize = fileSize;
 
@@ -122,7 +125,7 @@ AppendToBuffer (char* buffer, const char* str, ...)
      // TODO: Verify that strncat does not exceed bounds of buffer
 }
 
-/* CHIP8_LoadProgramIntoRAM
+/* LoadProgramIntoRAM
    Load hex digit bitmaps and program into CHIP-8 system memory.
 */
 static void
@@ -145,7 +148,7 @@ LoadProgramIntoRAM (unsigned char* program, const unsigned programSize)
 }
 
 int
-CHIP8_Main (const char* filename)
+CHIP8_Init (const char* filename)
 {
      if (!filename) {
           printf("%s is not a proper filename.\n", filename);
@@ -185,7 +188,7 @@ CHIP8_BuildInstructionBuffer (unsigned long length)
 
      buffer[0] = '\0';
      
-     for (int i = PROGRAM_LOC_OFFSET; i < PROGRAM_LOC_OFFSET+programSize; i += 2) {
+     for (unsigned i = PROGRAM_LOC_OFFSET; i < PROGRAM_LOC_OFFSET+programSize; i += 2) {
           uint16_t opcode = 0;
           opcode |= core.mem[i];
           opcode <<= 8;
@@ -665,7 +668,7 @@ CHIP8_FetchAndDecodeOpcode (void)
           
           printd("0xD000: Draw %d byte sprite at V%d(%d), V%d(%d)\n", n, x, core.v[x], y, core.v[y]);
           
-          for (int i = 0; i < n; i++) {
+          for (unsigned i = 0; i < n; i++) {
                // byte = row, bit = col
 
                uint8_t row = core.mem[core.i+i];
@@ -788,7 +791,7 @@ CHIP8_FetchAndDecodeOpcode (void)
                break;
           case 0x55:
                printd("0xFx55: Store registers V0 through V%d in memory starting at location 0x%03x\n", x, core.i);
-               for (int j = 0; j <= x; j++) {
+               for (unsigned j = 0; j <= x; j++) {
                     printd("0xFx55: Store V%d(%d) at 0x%03x\n", j, core.v[j], core.i+j);
                     core.mem[core.i+j] = core.v[j];
                }
@@ -796,7 +799,7 @@ CHIP8_FetchAndDecodeOpcode (void)
           case 0x65:
           {
                printd("0xFx65: Read registers V0 through V%d from memory starting at location 0x%03x\n", x, core.i);
-               for (int j = 0; j <= x; j++) {
+               for (unsigned j = 0; j <= x; j++) {
                     printd("0xFx65: Read %d into V%d\n", core.mem[core.i+j], j);
                     core.v[j] = core.mem[core.i+j];
                }

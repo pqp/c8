@@ -37,7 +37,7 @@ struct chip8_core {
      uint16_t stack[16];
 };
 
-int   CHIP8_Main (const char* filename);
+int   CHIP8_Init (const char* filename);
 int   CHIP8_LoadProgram (const char* filename);
 char* CHIP8_BuildInstructionBuffer (unsigned long length);
 void  CHIP8_Reset (void);
