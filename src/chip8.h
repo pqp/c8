@@ -41,7 +41,6 @@ int   CHIP8_Init (const char* filename);
 int   CHIP8_LoadProgram (const char* filename);
 char* CHIP8_BuildInstructionBuffer (unsigned long length);
 void  CHIP8_Reset (void);
-void  CHIP8_StartExecution (void);
 int   CHIP8_FetchAndDecodeOpcode (void);
 
 #endif

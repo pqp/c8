@@ -10,6 +10,22 @@ struct platform_interface_t {
      // video memory?
 };
 
+
+struct platform_keyvalue_t {
+     int key;
+     int value;
+};
+
+struct platform_keymap_t {
+     struct platform_keyvalue_t *pairs;
+     int n;
+     int length;
+};
+
+struct platform_keymap_t* KeyMap_Init (unsigned length);
+int  KeyMap_Get (struct platform_keymap_t* keymap, int key);
+void KeyMap_Insert (struct platform_keymap_t* keymap, int key, int value);
+
 extern struct chip8_core core;
 extern struct platform_interface_t pi;
 

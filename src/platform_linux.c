@@ -27,6 +27,8 @@ static GtkTextMark* mark;
 static GtkTextBuffer* buffer;
 static GtkTextIter start;
 
+static struct platform_keymap_t* globalKeymap;
+
 // Contents of V registers for debugger
 static char regStr[1024];
 
@@ -161,8 +163,8 @@ FileDialog (void)
 
           filename = gtk_file_chooser_get_filename(chooser);
                
-          if (CHIP8_Main(filename) < 0)
-               ;
+          if (CHIP8_Init(filename) < 0)
+               return;
 
           CHIP8_Reset();
      }
@@ -185,55 +187,14 @@ KeyRelease (GtkWidget* widget, GdkEvent* event, gpointer userData)
      }
      case GDK_KEY_F2:
           break;
-     case GDK_KEY_2:
-          pi.keys[0x1] = 0;
-          break;
-     case GDK_KEY_3:
-          pi.keys[0x2] = 0;
-          break;
-     case GDK_KEY_4:
-          pi.keys[0x3] = 0;
-          break;
-     case GDK_KEY_5:
-          pi.keys[0xC] = 0;
-          break;
-     case GDK_KEY_w:
-          pi.keys[0x4] = 0;
-          break;
-     case GDK_KEY_e:
-          pi.keys[0x5] = 0;
-          break;
-     case GDK_KEY_r:
-          pi.keys[0x6] = 0;
-          break;
-     case GDK_KEY_t:
-          pi.keys[0xD] = 0;
-          break;
-     case GDK_KEY_s:
-          pi.keys[0x7] = 0;
-          break;
-     case GDK_KEY_d:
-          pi.keys[0x8] = 0;
-          break;
-     case GDK_KEY_f:
-          pi.keys[0x9] = 0;
-          break;
-     case GDK_KEY_g:
-          pi.keys[0xE] = 0;
-          break;
-     case GDK_KEY_x:
-          pi.keys[0xA] = 0;
-          break;
-     case GDK_KEY_c:
-          pi.keys[0x0] = 0;
-          break;
-     case GDK_KEY_v:
-          pi.keys[0xB] = 0;
-          break;
-     case GDK_KEY_b:
-          pi.keys[0xF] = 0;
-          break;
      default:
+     {
+          int keyval = event->key.keyval;
+          int keyReleased = KeyMap_Get(globalKeymap, keyval);
+
+          if (keyReleased != -1)
+               pi.keys[keyReleased] = 0;
+     }
           break;
      }
 }
@@ -241,59 +202,11 @@ KeyRelease (GtkWidget* widget, GdkEvent* event, gpointer userData)
 static void
 KeyPress (GtkWidget* widget, GdkEvent* event, gpointer userData)
 {
-     switch (event->key.keyval)
-     {
-     case GDK_KEY_2:
-          pi.keys[0x1] = 1;
-          break;
-     case GDK_KEY_3:
-          pi.keys[0x2] = 1;
-          break;
-     case GDK_KEY_4:
-          pi.keys[0x3] = 1;
-          break;
-     case GDK_KEY_5:
-          pi.keys[0xC] = 1;
-          break;
-     case GDK_KEY_w:
-          pi.keys[0x4] = 1;
-          break;
-     case GDK_KEY_e:
-          pi.keys[0x5] = 1;
-          break;
-     case GDK_KEY_r:
-          pi.keys[0x6] = 1;
-          break;
-     case GDK_KEY_t:
-          pi.keys[0xD] = 1;
-          break;
-     case GDK_KEY_s:
-          pi.keys[0x7] = 1;
-          break;
-     case GDK_KEY_d:
-          pi.keys[0x8] = 1;
-          break;
-     case GDK_KEY_f:
-          pi.keys[0x9] = 1;
-          break;
-     case GDK_KEY_g:
-          pi.keys[0xE] = 1;
-          break;
-     case GDK_KEY_x:
-          pi.keys[0xA] = 1;
-          break;
-     case GDK_KEY_c:
-          pi.keys[0x0] = 1;
-          break;
-     case GDK_KEY_v:
-          pi.keys[0xB] = 1;
-          break;
-     case GDK_KEY_b:
-          pi.keys[0xF] = 1;
-          break;
-     default:
-          break;
-     }
+     int keyval = event->key.keyval;
+     int keyPressed = KeyMap_Get(globalKeymap, keyval);
+
+     if (keyPressed != -1)
+          pi.keys[keyPressed] = 1;
 }
 
 static gboolean
@@ -343,11 +256,15 @@ BuildMainWindow (GtkApplication* app)
      GtkWidget* mainWindow, *displayFrame, *mainBox;
 
      GtkWidget* menuBar;
+     // File menu and its different functions
      GtkWidget* fileMenu, *file, *fileLoad, *fileReset, *fileQuit;
+     // View menu and the debugger toggler
      GtkWidget* viewMenu, *view, *viewDebugger;
      
+     // Background color
      GdkColor black = { 0, 0, 0, 1 };
      
+     // Create main window (don't make it resizable)
      mainWindow = gtk_application_window_new(app);
      gtk_window_set_title(GTK_WINDOW(mainWindow), "C8");
      gtk_window_set_resizable(GTK_WINDOW(mainWindow), FALSE);
@@ -361,6 +278,7 @@ BuildMainWindow (GtkApplication* app)
      menuBar = gtk_menu_bar_new();
      gtk_widget_show(menuBar);
 
+     // Populate menu
      fileMenu = gtk_menu_new();
      file = gtk_menu_item_new_with_label("File");
      fileLoad = gtk_menu_item_new_with_label("Load");
@@ -398,9 +316,7 @@ BuildMainWindow (GtkApplication* app)
      g_signal_connect(G_OBJECT(fileLoad), "activate", G_CALLBACK(FileDialog), NULL);
      g_signal_connect(G_OBJECT(fileReset), "activate", G_CALLBACK(ResetClicked), NULL);
      g_signal_connect(G_OBJECT(fileQuit), "activate", G_CALLBACK(DestroyApplication), NULL);
-
      g_signal_connect(G_OBJECT(viewDebugger), "activate", G_CALLBACK(ToggleDebugger), NULL);
-
      g_signal_connect(G_OBJECT(mainWindow), "destroy", G_CALLBACK(DestroyApplication), NULL);
      g_signal_connect(G_OBJECT(mainWindow), "key-press-event", G_CALLBACK(KeyPress), NULL);
      g_signal_connect(G_OBJECT(mainWindow), "key-release-event", G_CALLBACK(KeyRelease), NULL);
@@ -455,6 +371,7 @@ BuildDebugWindow (GtkApplication* app)
      // Create code textview
      codeView = gtk_text_view_new();
      gtk_widget_set_hexpand(codeView, TRUE);
+     // TODO: replace deprecated modify_font
      gtk_widget_modify_font(codeView, fontDesc);
      gtk_text_view_set_editable(GTK_TEXT_VIEW(codeView), FALSE);
 
@@ -576,18 +493,44 @@ Activate (GtkApplication* app, gpointer userData)
      g_timeout_add(17, Redraw, NULL);
 }
 
+static void
+InitKeymap (void)
+{
+     globalKeymap = KeyMap_Init(32);
+
+     KeyMap_Insert(globalKeymap, GDK_KEY_2, 0x1);
+     KeyMap_Insert(globalKeymap, GDK_KEY_3, 0x2);
+     KeyMap_Insert(globalKeymap, GDK_KEY_4, 0x3);
+     KeyMap_Insert(globalKeymap, GDK_KEY_5, 0xC);
+     KeyMap_Insert(globalKeymap, GDK_KEY_w, 0x4);
+     KeyMap_Insert(globalKeymap, GDK_KEY_e, 0x5);
+     KeyMap_Insert(globalKeymap, GDK_KEY_r, 0x6);
+     KeyMap_Insert(globalKeymap, GDK_KEY_t, 0xD);
+     KeyMap_Insert(globalKeymap, GDK_KEY_s, 0x7);
+     KeyMap_Insert(globalKeymap, GDK_KEY_d, 0x8);
+     KeyMap_Insert(globalKeymap, GDK_KEY_f, 0x9);
+     KeyMap_Insert(globalKeymap, GDK_KEY_g, 0xE);
+     KeyMap_Insert(globalKeymap, GDK_KEY_x, 0xA);
+     KeyMap_Insert(globalKeymap, GDK_KEY_c, 0x0);
+     KeyMap_Insert(globalKeymap, GDK_KEY_v, 0xB);
+     KeyMap_Insert(globalKeymap, GDK_KEY_b, 0xF);
+}
+
 int
 main (int argc, char* argv[])
 {
      GtkApplication* app;
      int status;
      
-     if (!CHIP8_Main(argv[1])) {
+     if (!CHIP8_Init(argv[1])) {
           return 0;
      }
 
-     CHIP8_StartExecution();
+     InitKeymap();
 
+     CHIP8_Reset();
+
+     // Only needed for debugger
      disassemblyText = CHIP8_BuildInstructionBuffer(bufferLen);
 
      // TODO: Create a proper application ID 
